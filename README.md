@@ -7,13 +7,13 @@ Excell to JSON
 interface IConvertMessageData {
 	uid?: string;
 	data: Uint8Array | File;
-	sheet?: string; // search by name, use first sheet if not provided
-    styles?: boolean; // true by default
-    wasmPath?: string; // use cdn by default
+	sheet?: string;
+    styles?: boolean;
+    wasmPath?: string;
 }
 
 interface IReadyMessageData {
-	uid: string; // same as incoming uid
+	uid: string;
 	data: ISheetData[];
 	styles: IStyles[];
 }
@@ -38,16 +38,16 @@ interface IDataPoint {
 }
 
 interface IColumnData {
-	width: number;	//int, round to px
+	width: number;
 }
 
 interface IRowData {
-	height: number;	//int, round to px
+	height: number;
 }
 
 interface IDataCell{
-	v: string; // value
-	s: number: // style index, 0 - default style
+	v: string;
+	s: number:
 }
 
 interface IStyle {
@@ -64,11 +64,11 @@ interface IStyle {
 	textAlign?: string;
 	verticalAlign?: string;
 
-    borderLeft?: string;
-    borderTop?: string;
-    borderBottom?: string;
-    borderRight?: string;
+	borderLeft?: string;
+	borderTop?: string;
+	borderBottom?: string;
+	borderRight?: string;
 
-    format?: string;
+	format?: string;
 }
 ```
