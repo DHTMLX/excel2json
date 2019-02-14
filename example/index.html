@@ -1,0 +1,47 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Excel 2 JSON</title>
+    <style>
+        #text1, #text2 {
+            width:80%; height: 300px; display: block; margin:10px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Select an XLSX file for conversion</h3>
+    <input type="file" onchange="doConvert(this)">
+    <textarea id="text1"></textarea>
+    <textarea id="text2"></textarea>
+
+    <script type="text/javascript">
+    $ = document.querySelector.bind(document);
+
+    const worker = new Worker("../index.js");
+    worker.addEventListener("message", e => {
+        if (e.data.type === "ready"){
+            const data = e.data.data;
+            const styles = e.data.styles;
+
+            $("#text1").value = JSON.stringify(data, null, 2);
+            $("#text2").value = JSON.stringify(styles, null, 2);
+            console.log(data, styles)
+        }
+    });
+
+    function doConvert(input){
+        worker.postMessage({
+            type: "convert",
+            data: input.files[0],
+            // path relative to js file of worker
+            // wasmPath: "wasm/xlsx_export_bg.wasm"
+            // if not provided, will load wasm file from CDN
+            // https://cdn.dhtmlx.com/lib/excel2json/{{version}}.wasm
+        });
+    };
+
+    </script>
+</body>
+</html>

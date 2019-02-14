@@ -1,0 +1,32 @@
+{
+  "name": "excel2json-wasm",
+  "description":"WASM based web worker for converting excel data to raw json",
+  "keywords":"excel, convert, wasm",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author":{
+    "name":"Aleksei Kolosov"
+  },
+  "repository":{
+    "type":"git",
+    "url":"https://github.com/DHTMLX/excel2json"
+  },
+  "scripts": {
+    "test": "cargo +nightly test -- --nocapture",
+    "build-wasm": "cargo +nightly build --target wasm32-unknown-unknown --release && wasm-bindgen target/wasm32-unknown-unknown/release/xlsx_export.wasm --no-modules --out-dir ./wasm",
+    "build": "yarn rollup -c"
+  },
+  "main": "index.js",
+  "module": "js/worker.js",
+  "files": [
+    "/index.js",
+    "/js",
+    "/wasm"
+  ],
+  "devDependencies": {
+    "rollup": "^1.1.2"
+  },
+  "dependencies": {
+    "fast-text-encoding": "^1.0.0"
+  }
+}
