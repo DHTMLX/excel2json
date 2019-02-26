@@ -17,7 +17,6 @@
     "build": "yarn rollup -c"
   },
   "main": "index.js",
-  "module": "js/worker.js",
   "files": [
     "/index.js",
     "/js",

@@ -14,6 +14,11 @@ yarn build
 yarn build-wasm
 ```
 
+### CDN links
+
+- https://cdn.dhtmlx.com/libs/excel2json/1.0/worker.js 
+- https://cdn.dhtmlx.com/libs/excel2json/1.0/lib.wasm
+
 ### How to use
 
 ```js

@@ -20,7 +20,7 @@ onmessage = function(e) {
 
 let XLSX = null;
 function doConvert(input, config){
-    const path = config.wasmPath || "https://cdn.dhtmlx.com/libs/excel2json/1.wasm";
+    const path = config.wasmPath || "https://cdn.dhtmlx.com/libs/excel2json/1.0/lib.wasm";
     const getStyles = config.styles === undefined ? true : config.styles;
 
     if (XLSX) {
