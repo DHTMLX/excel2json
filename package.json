@@ -2,7 +2,7 @@
   "name": "excel2json-wasm",
   "description": "WASM based web worker for converting excel data to raw json",
   "keywords": "excel, convert, wasm",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "MIT",
   "author": {
     "name": "Aleksei Kolosov"
