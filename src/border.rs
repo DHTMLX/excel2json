@@ -25,7 +25,7 @@ pub struct Border {
 
 impl Border {
     pub fn new(position: BorderPosition) -> Border {
-        Border { position, color: String::from("#000"), style: BorderStyle::Medium }
+        Border { position, color: String::from("#D4D4D4"), style: BorderStyle::Medium }
     }
     pub fn set_style(&mut self, style: String) {
         if &style == "thin" {
