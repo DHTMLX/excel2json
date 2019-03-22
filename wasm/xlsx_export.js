@@ -1,7 +1,6 @@
 (function() {
-    var wasm;
     const __exports = {};
-
+    let wasm;
 
     let cachegetUint8Memory = null;
     function getUint8Memory() {
@@ -70,13 +69,42 @@ function globalArgumentPtr() {
 
 let cachedTextEncoder = new TextEncoder('utf-8');
 
-function passStringToWasm(arg) {
+let passStringToWasm;
+if (typeof cachedTextEncoder.encodeInto === 'function') {
+    passStringToWasm = function(arg) {
 
-    const buf = cachedTextEncoder.encode(arg);
-    const ptr = wasm.__wbindgen_malloc(buf.length);
-    getUint8Memory().set(buf, ptr);
-    WASM_VECTOR_LEN = buf.length;
-    return ptr;
+        let size = arg.length;
+        let ptr = wasm.__wbindgen_malloc(size);
+        let writeOffset = 0;
+        while (true) {
+            const view = getUint8Memory().subarray(ptr + writeOffset, ptr + size);
+            const { read, written } = cachedTextEncoder.encodeInto(arg, view);
+            arg = arg.substring(read);
+            writeOffset += written;
+            if (arg.length === 0) {
+                break;
+            }
+            ptr = wasm.__wbindgen_realloc(ptr, size, size * 2);
+            size *= 2;
+        }
+        WASM_VECTOR_LEN = writeOffset;
+        return ptr;
+    };
+} else {
+    passStringToWasm = function(arg) {
+
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = wasm.__wbindgen_malloc(buf.length);
+        getUint8Memory().set(buf, ptr);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    };
+}
+
+let cachedTextDecoder = new TextDecoder('utf-8');
+
+function getStringFromWasm(ptr, len) {
+    return cachedTextDecoder.decode(getUint8Memory().subarray(ptr, ptr + len));
 }
 
 function addHeapObject(obj) {
@@ -88,18 +116,12 @@ function addHeapObject(obj) {
     return idx;
 }
 
-let cachedTextDecoder = new TextDecoder('utf-8');
+__exports.__wbindgen_string_new = function(p, l) { return addHeapObject(getStringFromWasm(p, l)); };
 
-function getStringFromWasm(ptr, len) {
-    return cachedTextDecoder.decode(getUint8Memory().subarray(ptr, ptr + len));
-}
+__exports.__wbindgen_json_parse = function(ptr, len) { return addHeapObject(JSON.parse(getStringFromWasm(ptr, len))); };
 
-__exports.__wbindgen_string_new = function(p, l) {
-    return addHeapObject(getStringFromWasm(p, l));
-};
-
-__exports.__wbindgen_json_parse = function(ptr, len) {
-    return addHeapObject(JSON.parse(getStringFromWasm(ptr, len)));
+__exports.__wbindgen_throw = function(ptr, len) {
+    throw new Error(getStringFromWasm(ptr, len));
 };
 
 function freeXLSX(ptr) {
@@ -124,11 +146,11 @@ class XLSX {
     }
 
     /**
-    * @param {Uint8Array} arg0
+    * @param {Uint8Array} data
     * @returns {XLSX}
     */
-    static new(arg0) {
-        const ptr0 = passArray8ToWasm(arg0);
+    static new(data) {
+        const ptr0 = passArray8ToWasm(data);
         const len0 = WASM_VECTOR_LEN;
         return XLSX.__wrap(wasm.xlsx_new(ptr0, len0));
     }
@@ -154,49 +176,53 @@ class XLSX {
 
     }
     /**
-    * @param {string} arg0
+    * @param {string} sheet_name
     * @returns {any}
     */
-    get_sheet_data(arg0) {
-        const ptr0 = passStringToWasm(arg0);
+    get_sheet_data(sheet_name) {
+        const ptr0 = passStringToWasm(sheet_name);
         const len0 = WASM_VECTOR_LEN;
         return takeObject(wasm.xlsx_get_sheet_data(this.ptr, ptr0, len0));
     }
 }
 __exports.XLSX = XLSX;
 
-__exports.__wbindgen_throw = function(ptr, len) {
-    throw new Error(getStringFromWasm(ptr, len));
-};
+__exports.__wbindgen_object_drop_ref = function(i) { dropObject(i); };
 
-function init(path_or_module) {
-    let instantiation;
+function init(module_or_path, maybe_memory) {
+    let result;
     const imports = { './xlsx_export': __exports };
-    if (path_or_module instanceof WebAssembly.Module) {
-        instantiation = WebAssembly.instantiate(path_or_module, imports)
-        .then(instance => {
-        return { instance, module: path_or_module }
-    });
-} else {
-    const data = fetch(path_or_module);
-    if (typeof WebAssembly.instantiateStreaming === 'function') {
-        instantiation = WebAssembly.instantiateStreaming(data, imports)
-        .catch(e => {
-            console.warn("`WebAssembly.instantiateStreaming` failed. Assuming this is because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
-            return data
+    if (module_or_path instanceof URL || typeof module_or_path === 'string' || module_or_path instanceof Request) {
+
+        const response = fetch(module_or_path);
+        if (typeof WebAssembly.instantiateStreaming === 'function') {
+            result = WebAssembly.instantiateStreaming(response, imports)
+            .catch(e => {
+                console.warn("`WebAssembly.instantiateStreaming` failed. Assuming this is because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+                return response
+                .then(r => r.arrayBuffer())
+                .then(bytes => WebAssembly.instantiate(bytes, imports));
+            });
+        } else {
+            result = response
             .then(r => r.arrayBuffer())
             .then(bytes => WebAssembly.instantiate(bytes, imports));
-        });
+        }
     } else {
-        instantiation = data
-        .then(response => response.arrayBuffer())
-        .then(buffer => WebAssembly.instantiate(buffer, imports));
-    }
-}
-return instantiation.then(({instance}) => {
-    wasm = init.wasm = instance.exports;
 
-});
-};
+        result = WebAssembly.instantiate(module_or_path, imports)
+        .then(instance => {
+            return { instance, module: module_or_path };
+        });
+    }
+    return result.then(({instance, module}) => {
+        wasm = instance.exports;
+        init.__wbindgen_wasm_module = module;
+
+        return wasm;
+    });
+}
+
 self.wasm_bindgen = Object.assign(init, __exports);
+
 })();
