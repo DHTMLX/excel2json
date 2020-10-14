@@ -35,8 +35,12 @@
         worker.postMessage({
             type: "convert",
             data: input.files[0],
+
+            // optional, export formulas instead of final values
+            // formulas:true,
+
             // path relative to js file of worker
-            // wasmPath: "wasm/xlsx_export_bg.wasm"
+            // wasmPath: "pkg/xlsx_export_bg.wasm"
             // if not provided, will load wasm file from CDN
             // https://cdn.dhtmlx.com/lib/excel2json/{{version}}.wasm
         });

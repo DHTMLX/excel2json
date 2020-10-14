@@ -41,6 +41,8 @@ enum StyleXMLPath {
     Xf,
 }
 
+pub const WITH_FORMULAS: u32   = 1;
+
 #[derive(PartialEq)]
 enum SharedStringXMLPath {
     Any,
@@ -158,6 +160,9 @@ impl XLSX {
 
         xlsx
     }
+    pub fn with_formulas() -> u32{
+        return WITH_FORMULAS;
+    }
     pub fn get_styles(&mut self) -> JsValue {
         let styles = self.read_style().unwrap();
         JsValue::from_serde(&styles).unwrap()
@@ -165,9 +170,9 @@ impl XLSX {
     pub fn get_sheets(&self) -> Vec<JsValue> {
         self.sheets.clone().iter().map(|s| JsValue::from(&s.0)).collect()
     }
-    pub fn get_sheet_data(&mut self, sheet_name: String) -> JsValue {
+    pub fn get_sheet_data(&mut self, sheet_name: String, flags: u32) -> JsValue {
         let (name, path) = self.sheets.iter().find(|(name, _)| name == &sheet_name).unwrap().clone();
-        let data = self.read_sheet(path, name).unwrap();
+        let data = self.read_sheet(path, name, flags).unwrap();
 
         JsValue::from_serde(&data).unwrap()
     }
@@ -199,7 +204,7 @@ impl XLSX {
         }
         Ok(())
     }
-    fn read_sheet(&mut self, path: String, sheet_name: String) -> Result<SheetData, XlsxError> {
+    fn read_sheet(&mut self, path: String, sheet_name: String, flags: u32) -> Result<SheetData, XlsxError> {
         let mut xml = match xml_reader(&mut self.zip, &path) {
             None => {
                 return Err(XlsxError::FileNotFound(path))
@@ -335,13 +340,22 @@ impl XLSX {
                     data.cells.last_mut().unwrap().push(Some(last_cell));
                     last_cell = Cell::new();
                 },
+                Ok(Event::Start(ref e)) if e.local_name() == b"f" => {
+                    if flags & WITH_FORMULAS > 0 {
+                        let fline = &mut Vec::new();
+                        let value = xml.read_text(e.name(), fline).unwrap();
+                        last_cell.v = Some("=".to_owned() + &value);
+                    }
+                }
                 Ok(Event::Start(ref e)) if e.local_name() == b"v" => {
-                    let value = xml.read_text(e.name(), &mut Vec::new()).unwrap();
-                    if info.use_shared_string_for_next {
-                        let index: usize = value.parse().unwrap();
-                        last_cell.v = Some(self.shared_strings[index].to_owned());
-                    } else {
-                        last_cell.v = Some(value);
+                    if last_cell.v.is_none(){
+                        let value = xml.read_text(e.name(), &mut Vec::new()).unwrap();
+                        if info.use_shared_string_for_next {
+                            let index: usize = value.parse().unwrap();
+                            last_cell.v = Some(self.shared_strings[index].to_owned());
+                        } else {
+                            last_cell.v = Some(value);
+                        }
                     }
                 },
                 Ok(Event::Start(ref e)) if e.local_name() == b"mergeCell" => {
@@ -405,7 +419,7 @@ impl XLSX {
         }
     }
 
-    fn read_relationships(&mut self) -> Result<(HashMap<Vec<u8>, String>), XlsxError> {
+    fn read_relationships(&mut self) -> Result<HashMap<Vec<u8>, String>, XlsxError> {
         let mut xml = match xml_reader(&mut self.zip, "xl/_rels/workbook.xml.rels") {
             None => {
                 return Err(XlsxError::FileNotFound(

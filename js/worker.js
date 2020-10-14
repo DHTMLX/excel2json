@@ -1,5 +1,5 @@
 import "../node_modules/fast-text-encoding/text";
-import '../wasm/xlsx_export';
+import init, { XLSX } from '../pkg/xlsx_export';
 
 
 onmessage = function(e) {
@@ -18,12 +18,12 @@ onmessage = function(e) {
 }
 
 
-let XLSX = null;
+let loaded = false;
 function doConvert(input, config){
-    const path = config.wasmPath || "https://cdn.dhtmlx.com/libs/excel2json/1.0/lib.wasm";
+    const path = config.wasmPath || "https://cdn.dhtmlx.com/libs/excel2json/1.1/lib.wasm";
     const getStyles = config.styles === undefined ? true : config.styles;
 
-    if (XLSX) {
+    if (loaded) {
         const xlsx = XLSX.new(input);
         const styles = getStyles ? xlsx.get_styles() : null;
 
@@ -33,7 +33,8 @@ function doConvert(input, config){
             sheetsData = [data];
         } else {
             const sheets = xlsx.get_sheets();
-            sheetsData = sheets.map(name => xlsx.get_sheet_data(name));
+            const mode = 0 | (config.formulas ? XLSX.with_formulas(): 0);
+            sheetsData = sheets.map(name => xlsx.get_sheet_data(name, mode));
         }
 
         postMessage({
@@ -43,8 +44,8 @@ function doConvert(input, config){
             styles
         });
     } else {
-        wasm_bindgen(path).then(() => {
-            XLSX = wasm_bindgen.XLSX;
+        init(path).then(() => {
+            loaded = true;
             doConvert(input, config);
         }).catch(e => console.log(e));
     }

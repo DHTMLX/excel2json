@@ -7,13 +7,18 @@ Excel2json is a Rust and WebAssembly-based library that allows easily converting
 
 ### How to build
 
+#### wasm
+
+```
+cargo install wasm-pack
+wasm-pack build --target web
+```
+
+#### js
+
 ```
 yarn install
-// build js code
 yarn build
-// rebuild wasm code
-// rust toolchain is required
-yarn build-wasm
 ```
 
 ### How to use via npm 
@@ -53,19 +58,29 @@ worker.addEventListener("message", e => {
 });
 ```
 
+#### Export formulas
+
+```
+worker.postMessage({
+    type: "convert",
+    data: file_object_or_typed_array,
+    formulas: true
+});
+```
+
 ### How to use from CDN
 
 CDN links are the following:
 
-- https://cdn.dhtmlx.com/libs/excel2json/1.0/worker.js 
-- https://cdn.dhtmlx.com/libs/excel2json/1.0/lib.wasm
+- https://cdn.dhtmlx.com/libs/excel2json/1.1/worker.js 
+- https://cdn.dhtmlx.com/libs/excel2json/1.1/lib.wasm
 
 In case you use build system like webpack, it is advised to wrap the link to CDN source into a blob object to avoid possible 
 breakdowns:
 
 ```js
 var url = window.URL.createObjectURL(new Blob([
-    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.0/worker.js');"
+    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.1/worker.js');"
 ], { type: "text/javascript" }));
 
 var worker = new Worker(url);
