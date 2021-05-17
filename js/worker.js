@@ -29,7 +29,7 @@ function doConvert(input, config){
 
         let sheetsData;
         if (config.sheet) {
-            const data = xlsx.get_sheet_data(sheet);
+            const data = xlsx.get_sheet_data(config.sheet);
             sheetsData = [data];
         } else {
             const sheets = xlsx.get_sheets();
