@@ -1,29 +1,34 @@
 {
   "name": "excel2json-wasm",
   "description": "WASM based web worker for converting excel data to raw json",
-  "keywords": "excel, convert, wasm",
-  "version": "1.0.2",
+  "keywords": ["excel", "convert", "wasm"],
+  "version": "1.2.0",
   "license": "MIT",
-  "author": {
-    "name": "Aleksei Kolosov"
-  },
+  "collaborators": [
+    "Aleksei Kolosov <akolosov@xbsoftware.com>",
+    "Maksim Kozhukh <mk@mono.ink>"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/DHTMLX/excel2json"
   },
-  "scripts": {
-    "build": "yarn rollup -c"
-  },
-  "main": "index.js",
   "files": [
-    "/index.js",
-    "/js",
-    "/wasm"
+    "pkg/excel2json_wasm_bg.wasm",
+    "pkg/excel2json_wasm.js",
+    "pkg/excel2json_wasm_bg.js",
+    "pkg/excel2json_wasm.d.ts",
+    "js/worker.js",
+    "js/module.js"
   ],
-  "devDependencies": {
-    "rollup": "^1.1.2"
+  "module": "js/module.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
-  "dependencies": {
-    "fast-text-encoding": "^1.0.0"
+  "devDependencies": {
+    "vite": "^4.2.0",
+    "vite-plugin-wasm": "^3.2.2",
+    "vite-plugin-top-level-await": "^1.3.0"
   }
 }

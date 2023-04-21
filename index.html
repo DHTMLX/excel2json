@@ -1,0 +1,33 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Excel 2 JSON</title>
+    <style>
+        #text1, #text2 {
+            width:80%; height: 300px; display: block; margin:10px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Select an XLSX file for conversion</h3>
+    <input type="file" id="convert-button">
+    <textarea id="text1"></textarea>
+    <textarea id="text2"></textarea>
+
+    <script type="module">
+    let $ = document.querySelector.bind(document);
+    
+    $("#convert-button").addEventListener("change", function(e){
+        import("./js/module").then(({ convert }) => {
+            convert(this.files[0]).then(({ data, styles }) => {
+                $("#text1").value = JSON.stringify(data, null, 2);
+                $("#text2").value = JSON.stringify(styles, null, 2);
+                // console.log(data, styles);
+            });
+        });
+    });
+    </script>
+</body>
+</html>

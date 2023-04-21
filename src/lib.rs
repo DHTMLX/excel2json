@@ -1,21 +1,25 @@
 use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
-use serde_derive::{Serialize};
+// serializing helpers
+use serde::{Serialize};
+use gloo_utils::format::JsValueSerdeExt;
 
+// parsing xlsx (zip + xml)
 use quick_xml;
 use zip;
 
-use quick_xml::events::attributes::{Attribute};
 use quick_xml::events::{Event};
-use quick_xml::Reader as XmlReader;
+use quick_xml::reader::{Reader as XmlReader};
 use zip::read::{ZipArchive, ZipFile};
 
+// default collections
 use std::io::Cursor;
 use std::io::BufReader;
-
 use std::collections::HashMap;
 
+
+pub mod utils;
 pub mod border;
 use crate::border::{Border, BorderPosition};
 pub mod range;
@@ -25,6 +29,7 @@ type XlsReader<'a> = XmlReader<BufReader<ZipFile<'a>>>;
 type Sheet = (String, String);
 type Dict = HashMap<String, String>;
 
+// default sheet settings
 const DEFAULT_CELL_WIDTH: f32 = 15.75;
 const DEFAULT_CELL_HEIGHT: f32 = 14.25;
 const WIDTH_COEF: f32 = 8.5;
@@ -47,6 +52,7 @@ pub const WITH_FORMULAS: u32   = 1;
 enum SharedStringXMLPath {
     Any,
     Si,
+    T,
 }
 
 #[derive(Debug)]
@@ -142,6 +148,8 @@ pub struct XLSX {
 #[wasm_bindgen]
 impl XLSX {
     pub fn new(data: Vec<u8>) -> XLSX {
+        utils::set_panic_hook();
+
         let buf = Cursor::new(data);
         let zip = ZipArchive::new(buf).unwrap();
 
@@ -184,20 +192,32 @@ impl XLSX {
         let mut buf = Vec::new();
         
         let mut xml_path = SharedStringXMLPath::Any;
+        let mut temp:String = "".to_string();
+
         loop {
             buf.clear();
-            match xml.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) if e.local_name() == b"si" => {
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"si" => {
                     xml_path = SharedStringXMLPath::Si;
                 }
-                Ok(Event::Start(ref e)) if e.local_name() == b"t" && xml_path == SharedStringXMLPath::Si => {
-                    let value = xml.read_text(e.name(), &mut Vec::new()).unwrap();
-                    self.shared_strings.push(value);
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::Si => {
+                    xml_path = SharedStringXMLPath::T;
                 }
-                Ok(Event::End(ref e)) if e.local_name() == b"si" => {
+                Ok(Event::Text(ref e)) if xml_path == SharedStringXMLPath::T => {
+                    let value = e.unescape().unwrap();
+                    temp.push_str(value.as_ref());
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::T => {
+                    xml_path = SharedStringXMLPath::Si;
+                },
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"si" => {
+                    if temp.len() > 0 {
+                        self.shared_strings.push(temp);
+                        temp = "".to_string();
+                    }
                     xml_path = SharedStringXMLPath::Any;
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"sst" => break,
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"sst" => break,
                 Err(_) => return Err(XlsxError::Default),
                 _ => (),
             }
@@ -217,27 +237,28 @@ impl XLSX {
         let mut info = SheetInfo::new();
 
         let mut last_cell = Cell::new();
+        let mut mode = 0u8;
 
         loop {
             buf.clear();
-            match xml.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) if e.local_name() == b"sheetFormatPr" => {
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"sheetFormatPr" => {
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"tdefaultRowHeight", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
+                        match att.key.as_ref() {
+                            b"tdefaultRowHeight" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
                                 info.default_row_height = value.round() as u32;
                             },
-                            Attribute { key: b"defaultColWidth", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF;
+                            b"defaultColWidth" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF;
                                 info.default_col_width = value.round() as u32;
                             },
                             _ => ()
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"col" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"col" => {
                     let mut min = 0;
                     let mut max = 0;
                     let mut width = 0;
@@ -245,18 +266,18 @@ impl XLSX {
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"width", .. } => {
-                                width = (att.unescape_and_decode_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF).round() as u32;
+                        match att.key.as_ref() {
+                            b"width" => {
+                                width = (att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF).round() as u32;
                             },
-                            Attribute { key: b"min", .. } => {
-                                min = att.unescape_and_decode_value(&xml).unwrap().parse::<usize>().unwrap();
+                            b"min" => {
+                                min = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
                             },
-                            Attribute { key: b"max", .. } => {
-                                max = att.unescape_and_decode_value(&xml).unwrap().parse::<usize>().unwrap();
+                            b"max" => {
+                                max = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
                             },
-                            Attribute { key: b"customWidth", .. } => {
-                                use_custom_width = att.unescape_and_decode_value(&xml).unwrap() == "1";
+                            b"customWidth" => {
+                                use_custom_width = att.decode_and_unescape_value(&xml).unwrap() == "1";
                             },
                             _ => ()
                         }
@@ -271,22 +292,22 @@ impl XLSX {
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"row" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"row" => {
                     let mut use_custom_height = false;
                     let mut height = 0;
                     let mut index = 0;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"ht", .. } => {
-                                height = (att.unescape_and_decode_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF).round() as u32;
+                        match att.key.as_ref() {
+                            b"ht" => {
+                                height = (att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF).round() as u32;
                             },
-                            Attribute { key: b"customHeight", .. } => {
-                                use_custom_height = att.unescape_and_decode_value(&xml).unwrap() == "1";
+                            b"customHeight" => {
+                                use_custom_height = att.decode_and_unescape_value(&xml).unwrap() == "1";
                             },
-                            Attribute { key: b"r", .. } => {
-                                index = att.unescape_and_decode_value(&xml).unwrap().parse::<usize>().unwrap();
+                            b"r" => {
+                                index = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
                             }
                             _ => ()
                         }
@@ -303,23 +324,23 @@ impl XLSX {
                         data.rows.push(RowData {height: info.default_row_height});
                     }
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"c" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"c" => {
                     info.use_shared_string_for_next = false;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"t", .. } => {
-                                if att.unescape_and_decode_value(&xml).unwrap() == "s" {
+                        match att.key.as_ref() {
+                            b"t" => {
+                                if att.decode_and_unescape_value(&xml).unwrap() == "s" {
                                     info.use_shared_string_for_next = true;
                                 }
                             },
-                            Attribute { key: b"s", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap().parse::<u32>().unwrap();
+                            b"s" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<u32>().unwrap();
                                 last_cell.s = value;
                             },
-                            Attribute { key: b"r", value: v } => {
-                                let cell_name = xml.decode(&v).into_owned();
+                            b"r" => {
+                                let cell_name = att.decode_and_unescape_value(&xml).unwrap().to_string();
                                 let (col, _) = cell_index_to_offsets(cell_name.clone());
 
                                 let cols = data.cells.last_mut().unwrap();
@@ -336,20 +357,25 @@ impl XLSX {
                         }
                     }
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"c" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
                     data.cells.last_mut().unwrap().push(Some(last_cell));
                     last_cell = Cell::new();
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"f" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"f" => {
+                    mode = 1
+                }
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"v" => {
+                    mode = 2
+                },
+                Ok(Event::Text(ref e)) if mode == 1 => {
                     if flags & WITH_FORMULAS > 0 {
-                        let fline = &mut Vec::new();
-                        let value = xml.read_text(e.name(), fline).unwrap();
+                        let value = e.unescape().unwrap().to_string();
                         last_cell.v = Some("=".to_owned() + &value);
                     }
                 }
-                Ok(Event::Start(ref e)) if e.local_name() == b"v" => {
+                Ok(Event::Text(ref e)) if mode == 2 => {
                     if last_cell.v.is_none(){
-                        let value = xml.read_text(e.name(), &mut Vec::new()).unwrap();
+                        let value = e.unescape().unwrap().to_string();
                         if info.use_shared_string_for_next {
                             let index: usize = value.parse().unwrap();
                             last_cell.v = Some(self.shared_strings[index].to_owned());
@@ -358,13 +384,19 @@ impl XLSX {
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"mergeCell" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"f" => {
+                    mode = 0
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"v" => {
+                    mode = 0
+                },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"mergeCell" => {
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"ref", .. } => {
-                                let raw_merged_cell = att.unescape_and_decode_value(&xml).unwrap();
-                                let range = Range::new(raw_merged_cell);
+                        match att.key.as_ref() {
+                            b"ref" => {
+                                let raw_merged_cell = att.decode_and_unescape_value(&xml).unwrap();
+                                let range = Range::new(raw_merged_cell.into());
 
                                 let from = range.first;
                                 let to = range.last;
@@ -379,7 +411,7 @@ impl XLSX {
                         }
                     }
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"worksheet" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"worksheet" => {
                     loop {
                         match data.cells.last() {
                             Some(last) => {
@@ -432,24 +464,25 @@ impl XLSX {
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            match xml.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) if e.local_name() == b"Relationship" => {
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"Relationship" => {
                     let mut id = Vec::new();
                     let mut target = String::new();
                     for a in e.attributes() {
-                        match a.unwrap() {
-                            Attribute { key: b"Id", value: v } => {
-                                id.extend_from_slice(&v);
+                        let att = a.unwrap();
+                        match att.key.as_ref() {
+                            b"Id" => {
+                                id.extend_from_slice(att.value.as_ref());
                             },
-                            Attribute { key: b"Target", value: v } => {
-                                target = xml.decode(&v).into_owned();
+                            b"Target" => {
+                                target = att.decode_and_unescape_value(&xml).unwrap().into();
                             },
                             _ => (),
                         }
                     }
                     relationships.insert(id, target);
                 }
-                Ok(Event::End(ref e)) if e.local_name() == b"Relationships" => break,
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"Relationships" => break,
                 Err(_) => return Err(XlsxError::Default),
                 _ => (),
             }
@@ -469,21 +502,18 @@ impl XLSX {
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            match xml.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) if e.local_name() == b"sheet" => {
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"sheet" => {
                     let mut name = String::new();
                     let mut path = String::new();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"name", .. } => {
-                                name = att.unescape_and_decode_value(&xml).unwrap();
+                        match att.key.as_ref() {
+                            b"name" => {
+                                name = att.decode_and_unescape_value(&xml).unwrap().into();
                             },
-                            Attribute {
-                                key: b"r:id",
-                                value: v,
-                            } => {
-                                let r = &relationships[&*v][..];
+                            b"r:id" => {
+                                let r = &relationships[&*att.value][..];
                                 path = if r.starts_with("/xl/") {
                                     r[1..].to_string()
                                 } else if r.starts_with("xl/") {
@@ -497,7 +527,7 @@ impl XLSX {
                     }
                     self.sheets.push((name, path));
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"workbook" => break,
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"workbook" => break,
                 Err(_) => return Err(XlsxError::Default),
                 _ => (),
             }
@@ -530,39 +560,39 @@ impl XLSX {
 
         loop {
             buf.clear();
-            match xml.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) if xml_parent_path == StyleXMLPath::CellXfs && e.local_name() == b"xf"  => {
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if xml_parent_path == StyleXMLPath::CellXfs && e.name().as_ref() == b"xf"  => {
                     xml_path = StyleXMLPath::Xf;
                     let mut xf = HashMap::new();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"fontId", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                        match att.key.as_ref() {
+                            b"fontId" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 let index: usize = value.parse().unwrap();
                                 let font_style: Dict = fonts[index].clone();
 
                                 xf.extend(font_style);
                             },
-                            Attribute { key: b"borderId", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                            b"borderId" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 let index: usize = value.parse().unwrap();
                                 let border_style: Dict = borders[index].clone();
 
                                 xf.extend(border_style);
                             },
-                            Attribute { key: b"fillId", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                            b"fillId" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 let index: usize = value.parse().unwrap();
                                 let fill_style: Dict = fills[index].clone();
 
                                 xf.extend(fill_style);
                             },
-                            Attribute { key: b"numFmtId", .. } => {
-                                let format_id = att.unescape_and_decode_value(&xml).unwrap();
+                            b"numFmtId" => {
+                                let format_id = att.decode_and_unescape_value(&xml).unwrap();
                                 let format = match get_format(&format_id) {
                                     Some(v) => v,
-                                    None => extra_formats.get(&format_id).unwrap().to_owned()
+                                    None => extra_formats.get(format_id.as_ref()).unwrap().to_owned()
                                 };
                                 xf.insert(String::from("format"), format);
                             },
@@ -571,107 +601,107 @@ impl XLSX {
                     }
                     styles.push(xf);
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Xf && xml_parent_path == StyleXMLPath::CellXfs && e.local_name() == b"alignment" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Xf && xml_parent_path == StyleXMLPath::CellXfs && e.name().as_ref() == b"alignment" => {
                     let xf = styles.last_mut().unwrap();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"vertical", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                xf.insert(String::from("verticalAlign"), value);
+                        match att.key.as_ref() {
+                            b"vertical" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                xf.insert(String::from("verticalAlign"), value.into());
                             },
-                            Attribute { key: b"horizontal", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                xf.insert(String::from("textAlign"), value);
+                            b"horizontal" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                xf.insert(String::from("textAlign"), value.into());
                             },
                             _ => ()
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"numFmt" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"numFmt" => {
                     let mut format_code = String::from("");
                     let mut format_id = String::from("");
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"formatCode", .. } => {
-                                format_code = att.unescape_and_decode_value(&xml).unwrap();
+                        match att.key.as_ref() {
+                            b"formatCode" => {
+                                format_code = att.decode_and_unescape_value(&xml).unwrap().into();
                             },
-                            Attribute { key: b"numFmtId", .. } => {
-                                format_id = att.unescape_and_decode_value(&xml).unwrap();
+                            b"numFmtId" => {
+                                format_id = att.decode_and_unescape_value(&xml).unwrap().into();
                             },
                             _ => ()
                         }
                     }
                     extra_formats.insert(format_id, format_code);
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"font" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"font" => {
                     xml_path = StyleXMLPath::Font;
                     fonts.push(HashMap::new());
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"fill" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"fill" => {
                     xml_path = StyleXMLPath::Fill;
                     fills.push(HashMap::new());
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"border" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"border" => {
                     xml_path = StyleXMLPath::Border;
                 },
-                Ok(Event::Start(ref e)) if e.local_name() == b"cellXfs" => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"cellXfs" => {
                     xml_parent_path = StyleXMLPath::CellXfs;
                 },
                 // font styles
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"sz"  => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"sz"  => {
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"val", .. } => {
+                        match att.key.as_ref() {
+                            b"val" => {
                                 let font = fonts.last_mut().unwrap();
-                                let value = att.unescape_and_decode_value(&xml).unwrap().parse::<f32>().unwrap();
+                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap();
                                 font.insert(String::from("fontSize"), (value / PT_COEF).round().to_string() + "px");
                             },
                             _ => ()
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() ==  b"name" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() ==  b"name" => {
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"val", .. } => {
+                        match att.key.as_ref() {
+                            b"val" => {
                                 let font = fonts.last_mut().unwrap();
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                font.insert(String::from("fontFamily"), value);
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                font.insert(String::from("fontFamily"), value.into());
                             },
                             _ => ()
                         }
                     } 
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"color" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"color" => {
                     let font = fonts.last_mut().unwrap();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"rgb", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                font.insert(String::from("color"), get_xlsx_rgb(value));
+                        match att.key.as_ref() {
+                            b"rgb" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                font.insert(String::from("color"), get_xlsx_rgb(value.into()));
                             },
-                            Attribute { key: b"indexed", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                            b"indexed" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 font.insert(String::from("color"), get_indexed_color(&value));
                             },
                             _ => ()
                         }
                     }
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"b"  => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"b"  => {
                     let font = fonts.last_mut().unwrap();
                     font.insert(String::from("fontWeight"), String::from("bold"));
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"i" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"i" => {
                     let font = fonts.last_mut().unwrap();
                     font.insert(String::from("fontStyle"), String::from("italic"));
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"u" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"u" => {
                     let font = fonts.last_mut().unwrap();
                     if font.contains_key("textDecoration") {
                         font.insert(String::from("textDecoration"), String::from("line-through underline"));
@@ -679,7 +709,7 @@ impl XLSX {
                         font.insert(String::from("textDecoration"), String::from("underline"));
                     }
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.local_name() == b"strike"  => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"strike"  => {
                     let font = fonts.last_mut().unwrap();
                     if font.contains_key("textDecoration") {
                         font.insert(String::from("textDecoration"), String::from("line-through underline"));
@@ -688,77 +718,77 @@ impl XLSX {
                     }
                 },
                 // borders styles
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.local_name() == b"left" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.name().as_ref() == b"left" => {
                     let mut border = Border::new(BorderPosition::Left);
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"style", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                &border.set_style(value);
+                        match att.key.as_ref() {
+                            b"style" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                border.set_style(value.into());
                             },
                             _ => ()
                         }
                     }
                     border_structs.push(border);
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.local_name() == b"right" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.name().as_ref() == b"right" => {
                     let mut border = Border::new(BorderPosition::Right);
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"style", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                &border.set_style(value);
+                        match att.key.as_ref() {
+                            b"style" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                border.set_style(value.into());
                             },
                             _ => ()
                         }
                     }
                     border_structs.push(border);
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.local_name() == b"bottom" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.name().as_ref() == b"bottom" => {
                     let mut border = Border::new(BorderPosition::Bottom);
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"style", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                &border.set_style(value);
+                        match att.key.as_ref() {
+                            b"style" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                border.set_style(value.into());
                             },
                             _ => ()
                         }
                     }
                     border_structs.push(border);
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.local_name() == b"top" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.name().as_ref() == b"top" => {
                     let mut border = Border::new(BorderPosition::Top);
 
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"style", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                &border.set_style(value);
+                        match att.key.as_ref() {
+                            b"style" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                border.set_style(value.into());
                             },
                             _ => ()
                         }
                     }
                     border_structs.push(border);
                 },
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.local_name() == b"color" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Border && e.name().as_ref() == b"color" => {
                     let border = border_structs.last_mut().unwrap();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"rgb", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                border.set_color(get_xlsx_rgb(value));
+                        match att.key.as_ref() {
+                            b"rgb" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                border.set_color(get_xlsx_rgb(value.into()));
                             },
-                            Attribute { key: b"indexed", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                            b"indexed" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 border.set_color(get_indexed_color(&value));
                             },
                             _ => ()
@@ -766,36 +796,36 @@ impl XLSX {
                     }
                 },
                 // fills
-                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Fill && e.local_name() == b"fgColor" => {
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Fill && e.name().as_ref() == b"fgColor" => {
                     let fill = fills.last_mut().unwrap();
                     for a in e.attributes() {
                         let att = a.unwrap();
-                        match att {
-                            Attribute { key: b"rgb", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
-                                fill.insert(String::from("background"), get_xlsx_rgb(value));
+                        match att.key.as_ref() {
+                            b"rgb" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                fill.insert(String::from("background"), get_xlsx_rgb(value.into()));
                             },
-                            Attribute { key: b"indexed", .. } => {
-                                let value = att.unescape_and_decode_value(&xml).unwrap();
+                            b"indexed" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
                                 fill.insert(String::from("background"), get_indexed_color(&value));
                             },
                             _ => ()
                         }
                     }
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"cellXfs" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"cellXfs" => {
                     xml_parent_path = StyleXMLPath::Any;
                 },
-                Ok(Event::End(ref e)) if xml_parent_path == StyleXMLPath::CellXfs && e.local_name() == b"xf" => {
+                Ok(Event::End(ref e)) if xml_parent_path == StyleXMLPath::CellXfs && e.name().as_ref() == b"xf" => {
                     xml_path = StyleXMLPath::Any;
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"font" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"font" => {
                     xml_path = StyleXMLPath::Any;
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"fill" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"fill" => {
                     xml_path = StyleXMLPath::Any;
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"border" => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"border" => {
                     xml_path = StyleXMLPath::Any;
                     let mut border = HashMap::new();
 
@@ -806,7 +836,7 @@ impl XLSX {
                     }
                     borders.push(border);
                 },
-                Ok(Event::End(ref e)) if e.local_name() == b"styleSheet" => break,
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"styleSheet" => break,
                 Err(_) => return Err(XlsxError::Default),
                 _ => (),
             }
@@ -959,7 +989,7 @@ mod tests {
             let mut xlsx = XLSX::new(buf);
             // // cant test with get_sheet_data coz it return jsValue
             let (name, path) = xlsx.sheets[0].clone();
-            let _data = xlsx.read_sheet(path, name).unwrap();
+            let _data = xlsx.read_sheet(path, name, 0).unwrap();
             let _styles = xlsx.read_style();
         }
         let elapsed = now.elapsed();

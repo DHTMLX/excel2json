@@ -1,0 +1,45 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Excel 2 JSON</title>
+    <style>
+        #text1, #text2 {
+            width:80%; height: 300px; display: block; margin:10px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Select an XLSX file for conversion</h3>
+    <input type="file" id="convert-button">
+    <textarea id="text1"></textarea>
+    <textarea id="text2"></textarea>
+
+    <script type="module">
+    import MyWorker from "./js/worker.js?worker";
+    let $ = document.querySelector.bind(document);
+    
+    let worker;
+    $("#convert-button").addEventListener("change", function(e){
+        if (!worker) {
+            worker = new MyWorker();
+            worker.addEventListener("message", e => {
+                if (e.data.type === "ready"){
+                    const data = e.data.data;
+                    const styles = e.data.styles;
+
+                    $("#text1").value = JSON.stringify(data, null, 2);
+                    $("#text2").value = JSON.stringify(styles, null, 2);
+                }
+            });
+        }
+
+        worker.postMessage({
+            type: "convert",
+            data: this.files[0]
+        });
+    });
+    </script>
+</body>
+</html>

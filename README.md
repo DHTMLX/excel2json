@@ -11,79 +11,114 @@ Excel2json is a Rust and WebAssembly-based library that allows easily converting
 
 ```
 cargo install wasm-pack
-wasm-pack build --target web
+wasm-pack build
 ```
 
-#### js
 
-```
-yarn install
-yarn build
-```
-
-### How to use via npm 
+### How to use via npm
 
 - install the module
 
 ```js
 yarn add excel2json-wasm
 ```
-- import the module
+- import and use the module
 
 ```js
 // worker.js
-import("excel2json-wasm")
-```
-
-- use the module in the app
-
-```js
-// app.js
-const worker = new Worker("worker.js");
-
-// convert excel file to json
-worker.postMessage({
-    type: "convert",
-    data: file_object_or_typed_array
-});
-
-worker.addEventListener("message", e => {
-    if (e.data.type === "ready"){
-        const data = e.data.data;
-        const styles = e.data.styles;
-
-        //json data is ready
-        console.log(data, styles)
-    }
+import {convert} "excel2json-wasm";
+// convert int-array, works in sync mode
+const json = convertArray(Int8Array, optional_config);
+// converts file object or int-array in async mode
+convert(file_object_or_typed_array, optional_config).then(json => {
+    // do something
 });
 ```
 
-#### Export formulas
-
-```
-worker.postMessage({
-    type: "convert",
-    data: file_object_or_typed_array,
-    formulas: true
-});
-```
 
 ### How to use from CDN
 
 CDN links are the following:
 
-- https://cdn.dhtmlx.com/libs/excel2json/1.1/worker.js 
-- https://cdn.dhtmlx.com/libs/excel2json/1.1/lib.wasm
+- https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js 
+- https://cdn.dhtmlx.com/libs/excel2json/1.2/module.js 
+- https://cdn.dhtmlx.com/libs/excel2json/1.2/excel2json_wasm_bg.wasm
 
-In case you use build system like webpack, it is advised to wrap the link to CDN source into a blob object to avoid possible 
-breakdowns:
+
+You can import and use lib dynamically like 
+
+```js
+const convert = import("https://cdn.dhtmlx.com/libs/excel2json/1.2/module.js");
+const blob = convert(json_data_to_export);
+```
+
+or use it as web worker
 
 ```js
 var url = window.URL.createObjectURL(new Blob([
-    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.1/worker.js');"
+    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js');"
 ], { type: "text/javascript" }));
 
-var worker = new Worker(url);
+// you need to server worker from the same domain as the main script
+var worker = new Worker("./worker.js"); 
+worker.addEventListener("message", ev => {
+    if (ev.data.type === "ready"){
+        const json = ev.data.data;
+        // do something
+    }
+});
+worker.postMessage({
+    type:"convert",
+    data: file_object
+});
+worker.addEventListener("message", e => {
+    if (e.data.init){
+        // worker is ready
+    }
+})
+```
+
+if you want to load worker script from CDN and not from your domain it requires a more complicated approach, as you need to catch the moment when service inside of the worker will be fully initialized
+
+```js
+var url = window.URL.createObjectURL(new Blob([
+    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js');"
+], { type: "text/javascript" }));
+
+var worker = new Promise((res) => {
+    const x = Worker(url); 
+    worker.addEventListener("message", ev => {
+        if (ev.data.type === "ready"){
+            const json = ev.data.data;
+            // do something with result
+        } else if (ev.data.type === "init"){
+            // service is ready
+            res(x);
+        }
+    });
+});
+
+worker.then(x => x.postMessage({
+    type:"convert",
+    data: file_object
+}));
+```
+
+#### Export formulas
+
+
+```js
+const json = convert(data, { formulas:true });
+```
+
+or
+
+```js
+worker.postMessage({
+    type: "convert",
+    data: file_object_or_typed_array,
+    formulas: true
+});
 ```
 
 ### Output format
