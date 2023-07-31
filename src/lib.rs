@@ -211,10 +211,8 @@ impl XLSX {
                     xml_path = SharedStringXMLPath::Si;
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"si" => {
-                    if temp.len() > 0 {
-                        self.shared_strings.push(temp);
-                        temp = "".to_string();
-                    }
+                    self.shared_strings.push(temp);
+                    temp = "".to_string();
                     xml_path = SharedStringXMLPath::Any;
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"sst" => break,
@@ -358,7 +356,9 @@ impl XLSX {
                     }
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
-                    data.cells.last_mut().unwrap().push(Some(last_cell));
+                    if last_cell.v.is_some() {
+                        data.cells.last_mut().unwrap().push(Some(last_cell));
+                    }
                     last_cell = Cell::new();
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"f" => {
@@ -378,7 +378,9 @@ impl XLSX {
                         let value = e.unescape().unwrap().to_string();
                         if info.use_shared_string_for_next {
                             let index: usize = value.parse().unwrap();
-                            last_cell.v = Some(self.shared_strings[index].to_owned());
+                            if self.shared_strings[index].len() > 0 {
+                                last_cell.v = Some(self.shared_strings[index].to_owned());
+                            }
                         } else {
                             last_cell.v = Some(value);
                         }
