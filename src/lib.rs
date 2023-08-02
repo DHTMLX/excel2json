@@ -2,15 +2,15 @@ use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 // serializing helpers
-use serde::{Serialize};
+use serde::Serialize;
 use gloo_utils::format::JsValueSerdeExt;
 
 // parsing xlsx (zip + xml)
 use quick_xml;
 use zip;
 
-use quick_xml::events::{Event};
-use quick_xml::reader::{Reader as XmlReader};
+use quick_xml::events::Event;
+use quick_xml::reader::Reader as XmlReader;
 use zip::read::{ZipArchive, ZipFile};
 
 // default collections
@@ -64,12 +64,12 @@ enum XlsxError {
 
 #[derive(Serialize)]
 pub struct ColumnData {
-    pub width: u32,
+    pub width: f32,
 }
 
 #[derive(Serialize)]
 pub struct RowData {
-    pub height: u32,
+    pub height: f32,
 }
 
 #[derive(Serialize)]
@@ -122,8 +122,8 @@ impl SheetData {
 
 struct SheetInfo {
     cols_count: u32,
-    default_col_width: u32,
-    default_row_height: u32,
+    default_col_width: f32,
+    default_row_height: f32,
     use_shared_string_for_next: bool,
 }
 
@@ -131,8 +131,8 @@ impl SheetInfo {
     pub fn new() -> SheetInfo {
         SheetInfo {
             cols_count: 0,
-            default_col_width: (DEFAULT_CELL_WIDTH * WIDTH_COEF).round() as u32,
-            default_row_height: (DEFAULT_CELL_HEIGHT / HEIGHT_COEF).round() as u32,
+            default_col_width: DEFAULT_CELL_WIDTH * WIDTH_COEF,
+            default_row_height: DEFAULT_CELL_HEIGHT / HEIGHT_COEF,
             use_shared_string_for_next: false,
         }
     }
@@ -245,12 +245,10 @@ impl XLSX {
                         let att = a.unwrap();
                         match att.key.as_ref() {
                             b"tdefaultRowHeight" => {
-                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
-                                info.default_row_height = value.round() as u32;
+                                info.default_row_height = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
                             },
                             b"defaultColWidth" => {
-                                let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF;
-                                info.default_col_width = value.round() as u32;
+                                info.default_col_width = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF;
                             },
                             _ => ()
                         }
@@ -259,14 +257,14 @@ impl XLSX {
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"col" => {
                     let mut min = 0;
                     let mut max = 0;
-                    let mut width = 0;
+                    let mut width = 0.0;
                     let mut use_custom_width = false;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
                         match att.key.as_ref() {
                             b"width" => {
-                                width = (att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF).round() as u32;
+                                width = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() * WIDTH_COEF;
                             },
                             b"min" => {
                                 min = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
@@ -275,7 +273,8 @@ impl XLSX {
                                 max = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
                             },
                             b"customWidth" => {
-                                use_custom_width = att.decode_and_unescape_value(&xml).unwrap() == "1";
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                use_custom_width = v == "1" || v == "true";
                             },
                             _ => ()
                         }
@@ -292,17 +291,18 @@ impl XLSX {
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"row" => {
                     let mut use_custom_height = false;
-                    let mut height = 0;
+                    let mut height = 0.0;
                     let mut index = 0;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
                         match att.key.as_ref() {
                             b"ht" => {
-                                height = (att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF).round() as u32;
+                                height = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
                             },
                             b"customHeight" => {
-                                use_custom_height = att.decode_and_unescape_value(&xml).unwrap() == "1";
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                use_custom_height = v == "1" || v == "true";
                             },
                             b"r" => {
                                 index = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
@@ -659,7 +659,7 @@ impl XLSX {
                             b"val" => {
                                 let font = fonts.last_mut().unwrap();
                                 let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap();
-                                font.insert(String::from("fontSize"), (value / PT_COEF).round().to_string() + "px");
+                                font.insert(String::from("fontSize"), (value / PT_COEF).to_string() + "px");
                             },
                             _ => ()
                         }
@@ -834,7 +834,9 @@ impl XLSX {
                     while border_structs.len() > 0 {
                         let border_struct = border_structs.pop().unwrap();
                         let (key, value) = border_struct.get_computed_style();
-                        border.insert(key, value);
+                        if value != "" {
+                            border.insert(key, value);
+                        }
                     }
                     borders.push(border);
                 },
