@@ -181,7 +181,7 @@ interface IStyle {
     fontStyle?: string;
     textDecoration?: string;
 
-    textAlign?: string;
+    align?: string;
     verticalAlign?: string;
 
     borderLeft?: string;

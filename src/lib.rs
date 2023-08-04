@@ -614,7 +614,7 @@ impl XLSX {
                             },
                             b"horizontal" => {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                xf.insert(String::from("textAlign"), value.into());
+                                xf.insert(String::from("align"), value.into());
                             },
                             _ => ()
                         }
