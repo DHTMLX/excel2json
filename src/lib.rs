@@ -356,7 +356,7 @@ impl XLSX {
                     }
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
-                    if last_cell.v.is_some() {
+                    if last_cell.v.is_some() || last_cell.s > 0 {
                         data.cells.last_mut().unwrap().push(Some(last_cell));
                     }
                     last_cell = Cell::new();
