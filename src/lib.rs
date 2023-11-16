@@ -193,21 +193,29 @@ impl XLSX {
         
         let mut xml_path = SharedStringXMLPath::Any;
         let mut temp:String = "".to_string();
+        let mut ignore = false;
 
         loop {
             buf.clear();
-            match xml.read_event_into(&mut buf) {
+            let t = xml.read_event_into(&mut buf);
+            match t {
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"si" => {
                     xml_path = SharedStringXMLPath::Si;
                 }
-                Ok(Event::Start(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::Si => {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::Si && ignore == false => {
                     xml_path = SharedStringXMLPath::T;
+                }
+                Ok(Event::Start(ref e)) if xml_path == SharedStringXMLPath::Si && ( e.name().as_ref() == b"rPh" || e.name().as_ref() == b"phoneticPr") => {
+                    ignore = true
+                }
+                Ok(Event::End(ref e)) if xml_path == SharedStringXMLPath::Si && ( e.name().as_ref() == b"rPh" || e.name().as_ref() == b"phoneticPr") => {
+                    ignore = false
                 }
                 Ok(Event::Text(ref e)) if xml_path == SharedStringXMLPath::T => {
                     let value = e.unescape().unwrap();
                     temp.push_str(value.as_ref());
                 }
-                Ok(Event::End(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::T => {
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"t" && xml_path == SharedStringXMLPath::T && ignore == false => {
                     xml_path = SharedStringXMLPath::Si;
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"si" => {
@@ -987,7 +995,7 @@ mod tests {
 
         let now = std::time::Instant::now();
         {
-            let mut file = std::fs::File::open("./example/file_example_XLSX_5000.xlsx").unwrap();
+            let mut file = std::fs::File::open("./example/Test.xlsx").unwrap();
             let mut buf = vec!();
             file.read_to_end(&mut buf).unwrap();
             let mut xlsx = XLSX::new(buf);
