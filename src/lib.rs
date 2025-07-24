@@ -106,6 +106,11 @@ pub struct SheetData {
     pub rows: Vec<RowData>,
     pub cells: Vec<Vec<Option<Cell>>>,
     pub merged: Vec<MergedCell>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frozen_cols: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frozen_rows: Option<u32>,
 }
 
 impl SheetData {
@@ -116,6 +121,8 @@ impl SheetData {
             rows: vec!(),
             cells: vec!(),
             merged: vec!(),
+            frozen_cols: None,
+            frozen_rows: None,
         }
     }
 }
@@ -454,6 +461,22 @@ impl XLSX {
                         data.cols.extend((0..missed_col_data_count).map(|_| ColumnData {width: info.default_col_width}));
                     }
                     return Ok(data);
+                },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"pane" => {
+                    for a in e.attributes() {
+                        let att = a.unwrap();
+                        match att.key.as_ref() {
+                            b"xSplit" => {
+                                let val = att.decode_and_unescape_value(&xml).unwrap();
+                                data.frozen_cols = Some(val.parse::<u32>().unwrap());
+                            },
+                            b"ySplit" => {
+                                let val = att.decode_and_unescape_value(&xml).unwrap();
+                                data.frozen_rows = Some(val.parse::<u32>().unwrap());
+                            },
+                            _ => (),
+                        }
+                    }
                 },
                 Err(_) => return Err(XlsxError::Default),
                 _ => ()
