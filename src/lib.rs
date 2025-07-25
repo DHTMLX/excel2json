@@ -65,11 +65,15 @@ enum XlsxError {
 #[derive(Serialize)]
 pub struct ColumnData {
     pub width: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>
 }
 
 #[derive(Serialize)]
 pub struct RowData {
     pub height: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>
 }
 
 #[derive(Serialize)]
@@ -274,6 +278,7 @@ impl XLSX {
                     let mut max = 0;
                     let mut width = 0.0;
                     let mut use_custom_width = false;
+                    let mut hidden: Option<bool> = None;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
@@ -291,15 +296,19 @@ impl XLSX {
                                 let v = att.decode_and_unescape_value(&xml).unwrap();
                                 use_custom_width = v == "1" || v == "true";
                             },
+                            b"hidden" => {
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                hidden = Some(v == "1" || v == "true");
+                            },
                             _ => ()
                         }
                     }
                     if use_custom_width {
                         for i in data.cols.len()..max {
                             if i >= min-1 {
-                                data.cols.push(ColumnData {width});
+                                data.cols.push(ColumnData {width, hidden});
                             } else {
-                                data.cols.push(ColumnData {width: info.default_col_width});
+                                data.cols.push(ColumnData {width: info.default_col_width, hidden: None});
                             }
                         }
                     }
@@ -308,6 +317,7 @@ impl XLSX {
                     let mut use_custom_height = false;
                     let mut height = 0.0;
                     let mut index = 0;
+                    let mut hidden: Option<bool> = None;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
@@ -321,7 +331,11 @@ impl XLSX {
                             },
                             b"r" => {
                                 index = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
-                            }
+                            },
+                            b"hidden" => {
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                hidden = Some(v == "1" || v == "true");
+                            },
                             _ => ()
                         }
                     }
@@ -329,12 +343,12 @@ impl XLSX {
                         data.cells.push(vec!());
                     }
                     for _ in data.rows.len()..index-1 {
-                        data.rows.push(RowData {height: info.default_row_height});
+                        data.rows.push(RowData {height: info.default_row_height, hidden: None});
                     }
                     if use_custom_height {
-                        data.rows.push(RowData {height});
+                        data.rows.push(RowData {height, hidden});
                     } else {
-                        data.rows.push(RowData {height: info.default_row_height});
+                        data.rows.push(RowData {height: info.default_row_height, hidden});
                     }
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"c" => {
@@ -452,13 +466,13 @@ impl XLSX {
                     if missed_row_data_count < 0 {
                         data.rows = data.rows.into_iter().take(rows_count).collect();
                     } else {
-                        data.rows.extend((0..missed_row_data_count).map(|_| RowData {height: info.default_row_height}));
+                        data.rows.extend((0..missed_row_data_count).map(|_| RowData {height: info.default_row_height, hidden: None}));
                     }
                     let missed_col_data_count = info.cols_count as i32 - data.cols.len() as i32;
                     if missed_col_data_count < 0 {
                         data.cols = data.cols.into_iter().take(info.cols_count as usize).collect();
                     } else {
-                        data.cols.extend((0..missed_col_data_count).map(|_| ColumnData {width: info.default_col_width}));
+                        data.cols.extend((0..missed_col_data_count).map(|_| ColumnData {width: info.default_col_width, hidden: None}));
                     }
                     return Ok(data);
                 },
