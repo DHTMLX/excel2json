@@ -103,6 +103,20 @@ impl Cell {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub enum DataValidationSource {
+    List(Vec<String>),
+    RangeReference(String),
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataValidation {
+    pub range: String,
+    pub source: DataValidationSource,
+}
+
+
 #[derive(Serialize)]
 pub struct SheetData {
     pub name: String,
@@ -110,6 +124,7 @@ pub struct SheetData {
     pub rows: Vec<RowData>,
     pub cells: Vec<Vec<Option<Cell>>>,
     pub merged: Vec<MergedCell>,
+    pub validations: Vec<DataValidation>,
     
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frozen_cols: Option<u32>,
@@ -127,6 +142,7 @@ impl SheetData {
             merged: vec!(),
             frozen_cols: None,
             frozen_rows: None,
+            validations: vec![],
         }
     }
 }
@@ -499,6 +515,45 @@ impl XLSX {
                                 _ => (),
                             }
                         }
+                    }
+                },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"dataValidation" => {
+                    let mut range: Option<String> = None;
+                    let mut formula1: Option<String> = None;
+
+                    for a in e.attributes().flatten() {
+                        if a.key.as_ref() == b"sqref" {
+                            range = Some(a.decode_and_unescape_value(&xml).unwrap().to_string());
+                        }
+                    }
+
+                    let mut inner_buf = Vec::new();
+                    loop {
+                        inner_buf.clear();
+                        match xml.read_event_into(&mut inner_buf) {
+                            Ok(Event::Start(ref inner)) if inner.name().as_ref() == b"formula1" => {},
+                            Ok(Event::Text(t)) => {
+                                formula1 = Some(t.unescape().unwrap().to_string());
+                            },
+                            Ok(Event::End(ref inner)) if inner.name().as_ref() == b"dataValidation" => break,
+                            Err(_) => return Err(XlsxError::Default),
+                            _ => ()
+                        }
+                    }
+
+                    if let (Some(range), Some(formula)) = (range, formula1) {
+                        let source = if formula.starts_with('"') && formula.ends_with('"') {
+                            let list_raw = &formula[1..formula.len()-1];
+                            let list = list_raw.split(',').map(|s| s.trim().to_string()).collect();
+                            DataValidationSource::List(list)
+                        } else {
+                            DataValidationSource::RangeReference(formula)
+                        };
+
+                        data.validations.push(DataValidation {
+                            range,
+                            source,
+                        });
                     }
                 }
                 Err(_) => return Err(XlsxError::Default),
