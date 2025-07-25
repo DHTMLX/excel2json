@@ -464,20 +464,29 @@ impl XLSX {
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"pane" => {
                     for a in e.attributes() {
-                        let att = a.unwrap();
-                        match att.key.as_ref() {
-                            b"xSplit" => {
-                                let val = att.decode_and_unescape_value(&xml).unwrap();
-                                data.frozen_cols = Some(val.parse::<u32>().unwrap());
-                            },
-                            b"ySplit" => {
-                                let val = att.decode_and_unescape_value(&xml).unwrap();
-                                data.frozen_rows = Some(val.parse::<u32>().unwrap());
-                            },
-                            _ => (),
+                        if let Ok(att) = a {
+                            match att.key.as_ref() {
+                                b"xSplit" => {
+                                    if let Ok(val) = att.decode_and_unescape_value(&xml) {
+                                        if let Ok(n) = val.parse::<f64>() {
+                                            data.frozen_cols = Some(n as u32);
+                                        } else {
+                                        }
+                                    }
+                                },
+                                b"ySplit" => {
+                                    if let Ok(val) = att.decode_and_unescape_value(&xml) {
+                                        if let Ok(n) = val.parse::<f64>() {
+                                            data.frozen_rows = Some(n as u32);
+                                        } else {
+                                        }
+                                    }
+                                },
+                                _ => (),
+                            }
                         }
                     }
-                },
+                }
                 Err(_) => return Err(XlsxError::Default),
                 _ => ()
             }
