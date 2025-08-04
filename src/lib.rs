@@ -65,11 +65,15 @@ enum XlsxError {
 #[derive(Serialize)]
 pub struct ColumnData {
     pub width: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>
 }
 
 #[derive(Serialize)]
 pub struct RowData {
     pub height: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>
 }
 
 #[derive(Serialize)]
@@ -88,6 +92,8 @@ pub struct MergedCell {
 pub struct Cell {
     pub v: Option<String>,
     pub s: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyperlink: Option<String>,
 }
 
 impl Cell {
@@ -95,9 +101,24 @@ impl Cell {
         Cell {
             v: None,
             s: 0,
+            hyperlink: None,
         }
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub enum DataValidationSource {
+    List(Vec<String>),
+    RangeReference(String),
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataValidation {
+    pub range: String,
+    pub source: DataValidationSource,
+}
+
 
 #[derive(Serialize)]
 pub struct SheetData {
@@ -106,6 +127,12 @@ pub struct SheetData {
     pub rows: Vec<RowData>,
     pub cells: Vec<Vec<Option<Cell>>>,
     pub merged: Vec<MergedCell>,
+    pub validations: Vec<DataValidation>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frozen_cols: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frozen_rows: Option<u32>,
 }
 
 impl SheetData {
@@ -116,6 +143,9 @@ impl SheetData {
             rows: vec!(),
             cells: vec!(),
             merged: vec!(),
+            frozen_cols: None,
+            frozen_rows: None,
+            validations: vec![],
         }
     }
 }
@@ -231,6 +261,12 @@ impl XLSX {
         Ok(())
     }
     fn read_sheet(&mut self, path: String, sheet_name: String, flags: u32) -> Result<SheetData, XlsxError> {
+        let sheet_rel_path = path
+            .trim_start_matches("xl/worksheets/")
+            .trim_end_matches(".xml");
+        
+        let hyperlinks_map = Self::read_sheet_relationships(&mut self.zip, sheet_rel_path)?;
+        dbg!(&hyperlinks_map);
         let mut xml = match xml_reader(&mut self.zip, &path) {
             None => {
                 return Err(XlsxError::FileNotFound(path))
@@ -244,6 +280,10 @@ impl XLSX {
 
         let mut last_cell = Cell::new();
         let mut mode = 0u8;
+
+        
+        let mut hyperlinks = HashMap::<String, String>::new();
+        let mut current_cell_name: Option<String> = None;
 
         loop {
             buf.clear();
@@ -267,6 +307,7 @@ impl XLSX {
                     let mut max = 0;
                     let mut width = 0.0;
                     let mut use_custom_width = false;
+                    let mut hidden: Option<bool> = None;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
@@ -284,15 +325,19 @@ impl XLSX {
                                 let v = att.decode_and_unescape_value(&xml).unwrap();
                                 use_custom_width = v == "1" || v == "true";
                             },
+                            b"hidden" => {
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                hidden = Some(v == "1" || v == "true");
+                            },
                             _ => ()
                         }
                     }
                     if use_custom_width {
                         for i in data.cols.len()..max {
                             if i >= min-1 {
-                                data.cols.push(ColumnData {width});
+                                data.cols.push(ColumnData {width, hidden});
                             } else {
-                                data.cols.push(ColumnData {width: info.default_col_width});
+                                data.cols.push(ColumnData {width: info.default_col_width, hidden: None});
                             }
                         }
                     }
@@ -301,6 +346,7 @@ impl XLSX {
                     let mut use_custom_height = false;
                     let mut height = 0.0;
                     let mut index = 0;
+                    let mut hidden: Option<bool> = None;
 
                     for a in e.attributes() {
                         let att = a.unwrap();
@@ -314,7 +360,11 @@ impl XLSX {
                             },
                             b"r" => {
                                 index = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
-                            }
+                            },
+                            b"hidden" => {
+                                let v = att.decode_and_unescape_value(&xml).unwrap();
+                                hidden = Some(v == "1" || v == "true");
+                            },
                             _ => ()
                         }
                     }
@@ -322,12 +372,12 @@ impl XLSX {
                         data.cells.push(vec!());
                     }
                     for _ in data.rows.len()..index-1 {
-                        data.rows.push(RowData {height: info.default_row_height});
+                        data.rows.push(RowData {height: info.default_row_height, hidden: None});
                     }
                     if use_custom_height {
-                        data.rows.push(RowData {height});
+                        data.rows.push(RowData {height, hidden});
                     } else {
-                        data.rows.push(RowData {height: info.default_row_height});
+                        data.rows.push(RowData {height: info.default_row_height, hidden});
                     }
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"c" => {
@@ -348,6 +398,7 @@ impl XLSX {
                             b"r" => {
                                 let cell_name = att.decode_and_unescape_value(&xml).unwrap().to_string();
                                 let (col, _) = cell_index_to_offsets(cell_name.clone());
+                                current_cell_name = Some(cell_name.clone());
 
                                 let cols = data.cells.last_mut().unwrap();
 
@@ -364,10 +415,23 @@ impl XLSX {
                     }
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
-                    if last_cell.v.is_some() || last_cell.s > 0 {
+                    let has_value = last_cell.v.is_some() || last_cell.s > 0;
+                    let has_hyperlink = current_cell_name
+                        .as_ref()
+                        .map(|name| hyperlinks.contains_key(name))
+                        .unwrap_or(false);
+
+                    if has_value || has_hyperlink {
+    
+                        if let Some(ref name) = current_cell_name {
+                            if let Some(link) = hyperlinks.get(name) {
+                                last_cell.hyperlink = Some(link.clone());
+                            }
+                        }
                         data.cells.last_mut().unwrap().push(Some(last_cell));
                     }
                     last_cell = Cell::new();
+                    current_cell_name = None;
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"f" => {
                     mode = 1
@@ -445,22 +509,155 @@ impl XLSX {
                     if missed_row_data_count < 0 {
                         data.rows = data.rows.into_iter().take(rows_count).collect();
                     } else {
-                        data.rows.extend((0..missed_row_data_count).map(|_| RowData {height: info.default_row_height}));
+                        data.rows.extend((0..missed_row_data_count).map(|_| RowData {height: info.default_row_height, hidden: None}));
                     }
                     let missed_col_data_count = info.cols_count as i32 - data.cols.len() as i32;
                     if missed_col_data_count < 0 {
                         data.cols = data.cols.into_iter().take(info.cols_count as usize).collect();
                     } else {
-                        data.cols.extend((0..missed_col_data_count).map(|_| ColumnData {width: info.default_col_width}));
+                        data.cols.extend((0..missed_col_data_count).map(|_| ColumnData {width: info.default_col_width, hidden: None}));
+                    }
+                    for (cell_name, link) in hyperlinks {
+                        let (col, row) = cell_index_to_offsets(cell_name);
+                        if let Some(Some(cell)) = data.cells.get_mut(row as usize).and_then(|r| r.get_mut(col as usize)) {
+                            cell.hyperlink = Some(link);
+                        }
                     }
                     return Ok(data);
                 },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"pane" => {
+                    for a in e.attributes() {
+                        if let Ok(att) = a {
+                            match att.key.as_ref() {
+                                b"xSplit" => {
+                                    if let Ok(val) = att.decode_and_unescape_value(&xml) {
+                                        if let Ok(n) = val.parse::<f64>() {
+                                            data.frozen_cols = Some(n as u32);
+                                        } else {
+                                        }
+                                    }
+                                },
+                                b"ySplit" => {
+                                    if let Ok(val) = att.decode_and_unescape_value(&xml) {
+                                        if let Ok(n) = val.parse::<f64>() {
+                                            data.frozen_rows = Some(n as u32);
+                                        } else {
+                                        }
+                                    }
+                                },
+                                _ => (),
+                            }
+                        }
+                    }
+                },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"dataValidation" => {
+                    let mut range: Option<String> = None;
+                    let mut formula1: Option<String> = None;
+
+                    for a in e.attributes().flatten() {
+                        if a.key.as_ref() == b"sqref" {
+                            range = Some(a.decode_and_unescape_value(&xml).unwrap().to_string());
+                        }
+                    }
+
+                    let mut inner_buf = Vec::new();
+                    loop {
+                        inner_buf.clear();
+                        match xml.read_event_into(&mut inner_buf) {
+                            Ok(Event::Start(ref inner)) if inner.name().as_ref() == b"formula1" => {},
+                            Ok(Event::Text(t)) => {
+                                formula1 = Some(t.unescape().unwrap().to_string());
+                            },
+                            Ok(Event::End(ref inner)) if inner.name().as_ref() == b"dataValidation" => break,
+                            Err(_) => return Err(XlsxError::Default),
+                            _ => ()
+                        }
+                    }
+
+                    if let (Some(range), Some(formula)) = (range, formula1) {
+                        let source = if formula.starts_with('"') && formula.ends_with('"') {
+                            let list_raw = &formula[1..formula.len()-1];
+                            let list = list_raw.split(',').map(|s| s.trim().to_string()).collect();
+                            DataValidationSource::List(list)
+                        } else {
+                            DataValidationSource::RangeReference(formula)
+                        };
+
+                        data.validations.push(DataValidation {
+                            range,
+                            source,
+                        });
+                    }
+                },
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"hyperlink" => {
+                    let mut cell_ref = None;
+                    let mut rel_id = None;
+
+                    for a in e.attributes() {
+                        let att = a.unwrap();
+                        match att.key.as_ref() {
+                            b"ref" => {
+                                cell_ref = Some(att.decode_and_unescape_value(&xml).unwrap().to_string());
+                            },
+                            b"r:id" => {
+                                rel_id = Some(att.decode_and_unescape_value(&xml).unwrap().into_owned());
+                            },
+                            _ => (),
+                        }
+                    }
+
+                    if let (Some(cell), Some(id)) = (cell_ref, rel_id) {
+                        if let Some(link) = hyperlinks_map.get(&id) {
+                            hyperlinks.insert(cell.clone(), link.clone());
+                        }
+                    }
+                }                
                 Err(_) => return Err(XlsxError::Default),
                 _ => ()
             }
         }
     }
 
+    fn read_sheet_relationships(
+        zip: &mut ZipArchive<Cursor<Vec<u8>>>,
+        sheet_path: &str,
+    ) -> Result<HashMap<String, String>, XlsxError> {
+        let rel_path = format!("xl/worksheets/_rels/{}.xml.rels", sheet_path); // ✅ фикс
+        let mut xml = match xml_reader(zip, &rel_path) {
+            Some(Ok(x)) => x,
+            _ => return Ok(HashMap::new()),
+        };
+
+        let mut map = HashMap::new();
+        let mut buf = Vec::new();
+
+        loop {
+            buf.clear();
+            match xml.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"Relationship" => {
+                    let mut id = String::new();
+                    let mut target = String::new();
+
+                    for a in e.attributes().flatten() {
+                        match a.key.as_ref() {
+                            b"Id" => id = a.unescape_value().unwrap().into_owned(),
+                            b"Target" => target = a.unescape_value().unwrap().into_owned(),
+                            _ => (),
+                        }
+                    }
+
+                    if !id.is_empty() && !target.is_empty() {
+                        map.insert(id, target);
+                    }
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"Relationships" => break,
+                Err(_) => return Err(XlsxError::Default),
+                _ => (),
+            }
+        }
+
+        Ok(map)
+    }
     fn read_relationships(&mut self) -> Result<HashMap<Vec<u8>, String>, XlsxError> {
         let mut xml = match xml_reader(&mut self.zip, "xl/_rels/workbook.xml.rels") {
             None => {
