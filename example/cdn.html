@@ -17,27 +17,16 @@
     <textarea id="text2"></textarea>
 
     <script type="module">
-    import MyWorker from "./js/worker.js?worker";
+    import { convert } from "https://cdn.dhtmlx.com/libs/excel2json/1.4/module.js";
     let $ = document.querySelector.bind(document);
     
-    let worker;
     $("#convert-button").addEventListener("change", function(e){
-        if (!worker) {
-            worker = new MyWorker();
-            worker.addEventListener("message", e => {
-                if (e.data.type === "ready"){
-                    const data = e.data.data;
-                    const styles = e.data.styles;
-
-                    $("#text1").value = JSON.stringify(data, null, 2);
-                    $("#text2").value = JSON.stringify(styles, null, 2);
-                }
+        import("../dist/module").then(({ convert }) => {
+            convert(this.files[0]).then(({ data, styles }) => {
+                $("#text1").value = JSON.stringify(data, null, 2);
+                $("#text2").value = JSON.stringify(styles, null, 2);
+                // console.log(data, styles);
             });
-        }
-
-        worker.postMessage({
-            type: "convert",
-            data: this.files[0]
         });
     });
     </script>

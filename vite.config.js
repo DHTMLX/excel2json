@@ -1,41 +1,63 @@
 import { resolve } from "path";
 import { defineConfig } from 'vite'
-
 import wasm from "vite-plugin-wasm";
 import topLevelAwait from "vite-plugin-top-level-await";
 
-export default defineConfig({
-  base:"./",
+const baseConfig = {
+  base: "./",
   plugins: [
-    wasm()
+    wasm(),
+    topLevelAwait()
   ],
-  format: "esm",
-  build:{
+  build: {
     target: "esnext",
-    rollupOptions: {
-      input:{
-        main: resolve(__dirname, "index.html"),
-        worker: resolve(__dirname, "worker.html"),
-      },
-      output: {
-        entryFileNames: `assets/[name].js`,
-        chunkFileNames: `assets/[name].js`,
-        assetFileNames: `assets/[name].[ext]`,
+    emptyOutDir: false,
+  }
+};
+
+// Use mode to determine which config to use
+export default defineConfig(({ mode }) => {
+  if (mode === 'module') {
+    return {
+      ...baseConfig,
+      build: {
+        ...baseConfig.build,
+        lib: {
+          entry: resolve(__dirname, "./js/module.js"),
+          formats: ['es'],
+          fileName: () => 'module.js',
+        },
+        rollupOptions: {
+          output: {
+            entryFileNames: `[name].js`,
+            chunkFileNames: `[name].js`,
+            assetFileNames: `[name].[ext]`
+          }
+        }
       }
     }
-  },
-  worker:{
-    plugins: [
-      wasm(),
-      topLevelAwait()
-    ],
-    format: "esm",
-    rollupOptions: {
-      output: {
-        entryFileNames: `assets/[name].js`,
-        chunkFileNames: `assets/[name].js`,
-        assetFileNames: `assets/[name].[ext]`,
+  }
+
+  if (mode === 'worker') {
+    return {
+      ...baseConfig,
+      build: {
+        ...baseConfig.build,
+        lib: {
+          entry: resolve(__dirname, "./js/worker.js"),
+          formats: ['cjs'],
+          fileName: () => 'worker.js',
+        },
+        rollupOptions: {
+          output: {
+            entryFileNames: `[name].js`,
+            chunkFileNames: `[name].js`,
+            assetFileNames: `[name].[ext]`
+          }
+        }
       }
     }
-  },
+  }
+
+  throw new Error('Please specify mode: module or worker');
 });

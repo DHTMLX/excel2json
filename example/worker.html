@@ -17,18 +17,24 @@
     <textarea id="text2"></textarea>
 
     <script type="module">
+    import MyWorker from "../dist/worker.js?worker";
     let $ = document.querySelector.bind(document);
     
     let worker;
     $("#convert-button").addEventListener("change", function(e){
         if (!worker) {
             worker = new Promise((res) => {
-                const path = "http://127.0.0.1:8200/dist/assets/worker.js";
+                 const path = `${window.location.origin}/dist/worker.js`;
+               // const path = "https://cdn.dhtmlx.com/libs/json2excel/1.4/worker.js";
                 const url = window.URL.createObjectURL(
-			    	new Blob([`importScripts('${path}');`], { type: "text/javascript" })
-			    );
+                    new Blob([`importScripts('${path}');`], {
+                        type: "text/javascript",
+                    })
+                );
+
                 const x = new Worker(url);
                 x.addEventListener("message", e => {
+                    console.log(e.data);
                     if (e.data.type === "init"){
                         res(x);
                     } else if (e.data.type === "ready"){
@@ -42,11 +48,10 @@
             });
         }
 
-        const data = this.files[0];
         worker.then(x => {
             x.postMessage({
                 type: "convert",
-                data
+                data: this.files[0]
             });
         });
     });

@@ -1,17 +1,8 @@
 
 import init, { XLSX } from '../pkg/excel2json_wasm.js';
 
-let initialized = false;
-
 onmessage = async function (e) {
     const config = e.data;
-
-    if (!initialized) {
-        await init(); // важно! инициализация WASM
-        initialized = true;
-        postMessage({ type: "init" });
-        return;
-    }
 
     if (config.type === "convert") {
         const file = config.data;
@@ -28,7 +19,9 @@ onmessage = async function (e) {
     }
 };
 
-function doConvert(input, config) {
+async function doConvert(input, config) {
+    await init();
+
     const getStyles = config.styles === undefined ? true : config.styles;
 
     const xlsx = XLSX.new(input);
@@ -51,3 +44,5 @@ function doConvert(input, config) {
         styles
     });
 }
+
+postMessage({ type:"init" });

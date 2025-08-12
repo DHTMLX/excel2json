@@ -20,7 +20,7 @@
     let $ = document.querySelector.bind(document);
     
     $("#convert-button").addEventListener("change", function(e){
-        import("./js/module").then(({ convert }) => {
+        import("../dist/module").then(({ convert }) => {
             convert(this.files[0]).then(({ data, styles }) => {
                 $("#text1").value = JSON.stringify(data, null, 2);
                 $("#text2").value = JSON.stringify(styles, null, 2);
