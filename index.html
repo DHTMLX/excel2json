@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Routing Example</title>
+</head>
+<body>
+    <nav>
+        <a href="./cdn.html">CDN</a> |
+        <a href="./lib.html">Lib</a> |
+        <a href="./worker.html">Worker</a>
+    </nav>
+    <div id="app"></div>
+
+    <script>
+        const routes = {
+            cdn: '<h2>CDN Page</h2><p>This is cdn.html content.</p>',
+            lib: '<h2>Lib Page</h2><p>This is lib.html content.</p>',
+            worker: '<h2>Worker Page</h2><p>This is worker.html content.</p>',
+        };
+
+        function renderRoute() {
+            const hash = location.hash.replace('#', '');
+            document.getElementById('app').innerHTML = routes[hash] || '<h2>Welcome</h2><p>Select a page.</p>';
+        }
+
+        window.addEventListener('hashchange', renderRoute);
+        window.addEventListener('DOMContentLoaded', renderRoute);
+    </script>
+</body>
+</html>

@@ -821,6 +821,12 @@ impl XLSX {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
                                 xf.insert(String::from("align"), value.into());
                             },
+                            b"wrapText" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                if value == "1" || value == "true" {
+                                    xf.insert(String::from("wrapText"), String::from("true"));
+                                }
+                            },
                             _ => ()
                         }
                     }
