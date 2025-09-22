@@ -75,6 +75,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
  "web-sys",

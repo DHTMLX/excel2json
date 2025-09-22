@@ -17,6 +17,7 @@ use zip::read::{ZipArchive, ZipFile};
 use std::io::Cursor;
 use std::io::BufReader;
 use std::collections::HashMap;
+use serde_json::Value as JsonValue;
 
 
 pub mod utils;
@@ -27,7 +28,7 @@ use crate::range::{Range, cell_index_to_offsets};
 
 type XlsReader<'a> = XmlReader<BufReader<ZipFile<'a>>>;
 type Sheet = (String, String);
-type Dict = HashMap<String, String>;
+type Dict = HashMap<String, JsonValue>;
 
 // default sheet settings
 const DEFAULT_CELL_WIDTH: f32 = 15.75;
@@ -374,11 +375,8 @@ impl XLSX {
                     for _ in data.rows.len()..index-1 {
                         data.rows.push(RowData {height: info.default_row_height, hidden: None});
                     }
-                    if use_custom_height {
-                        data.rows.push(RowData {height, hidden});
-                    } else {
-                        data.rows.push(RowData {height: info.default_row_height, hidden});
-                    }
+                    let final_height = (height > 0.0).then(|| height).unwrap_or(info.default_row_height);
+                    data.rows.push(RowData { height: final_height, hidden });
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"c" => {
                     info.use_shared_string_for_next = false;
@@ -798,7 +796,7 @@ impl XLSX {
                             b"numFmtId" => {
                                 let format_id = att.decode_and_unescape_value(&xml).unwrap();
                                 let format = match get_format(&format_id) {
-                                    Some(v) => v,
+                                    Some(v) => JsonValue::String(v),
                                     None => extra_formats.get(format_id.as_ref()).unwrap().to_owned()
                                 };
                                 xf.insert(String::from("format"), format);
@@ -821,6 +819,12 @@ impl XLSX {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
                                 xf.insert(String::from("align"), value.into());
                             },
+                            b"wrapText" => {
+                                let value = att.decode_and_unescape_value(&xml).unwrap();
+                                if value == "1" || value == "true" {
+                                    xf.insert(String::from("wrapText"), JsonValue::Bool(true));
+                                }
+                            },
                             _ => ()
                         }
                     }
@@ -840,7 +844,7 @@ impl XLSX {
                             _ => ()
                         }
                     }
-                    extra_formats.insert(format_id, format_code);
+                    extra_formats.insert(format_id, JsonValue::String(format_code));
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"font" => {
                     xml_path = StyleXMLPath::Font;
@@ -864,7 +868,7 @@ impl XLSX {
                             b"val" => {
                                 let font = fonts.last_mut().unwrap();
                                 let value = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap();
-                                font.insert(String::from("fontSize"), (value / PT_COEF).to_string() + "px");
+                                font.insert(String::from("fontSize"), JsonValue::String((value / PT_COEF).to_string() + "px"));
                             },
                             _ => ()
                         }
@@ -877,7 +881,7 @@ impl XLSX {
                             b"val" => {
                                 let font = fonts.last_mut().unwrap();
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                font.insert(String::from("fontFamily"), value.into());
+                                font.insert(String::from("fontFamily"), JsonValue::String(value.into()));
                             },
                             _ => ()
                         }
@@ -890,11 +894,11 @@ impl XLSX {
                         match att.key.as_ref() {
                             b"rgb" => {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                font.insert(String::from("color"), get_xlsx_rgb(value.into()));
+                                font.insert(String::from("color"), JsonValue::String(get_xlsx_rgb(value.into())));
                             },
                             b"indexed" => {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                font.insert(String::from("color"), get_indexed_color(&value));
+                                font.insert(String::from("color"), JsonValue::String(get_indexed_color(&value)));
                             },
                             _ => ()
                         }
@@ -902,26 +906,26 @@ impl XLSX {
                 },
                 Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"b"  => {
                     let font = fonts.last_mut().unwrap();
-                    font.insert(String::from("fontWeight"), String::from("bold"));
+                    font.insert(String::from("fontWeight"), JsonValue::String(String::from("bold")));
                 },
                 Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"i" => {
                     let font = fonts.last_mut().unwrap();
-                    font.insert(String::from("fontStyle"), String::from("italic"));
+                    font.insert(String::from("fontStyle"), JsonValue::String(String::from("italic")));
                 },
                 Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"u" => {
                     let font = fonts.last_mut().unwrap();
                     if font.contains_key("textDecoration") {
-                        font.insert(String::from("textDecoration"), String::from("line-through underline"));
+                        font.insert(String::from("textDecoration"), JsonValue::String(String::from("line-through underline")));
                     } else {
-                        font.insert(String::from("textDecoration"), String::from("underline"));
+                        font.insert(String::from("textDecoration"), JsonValue::String(String::from("underline")));
                     }
                 },
                 Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Font && e.name().as_ref() == b"strike"  => {
                     let font = fonts.last_mut().unwrap();
                     if font.contains_key("textDecoration") {
-                        font.insert(String::from("textDecoration"), String::from("line-through underline"));
+                        font.insert(String::from("textDecoration"), JsonValue::String(String::from("line-through underline")));
                     } else {
-                        font.insert(String::from("textDecoration"), String::from("line-through"));
+                        font.insert(String::from("textDecoration"), JsonValue::String(String::from("line-through")));
                     }
                 },
                 // borders styles
@@ -1010,11 +1014,11 @@ impl XLSX {
                         match att.key.as_ref() {
                             b"rgb" => {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                fill.insert(String::from("background"), get_xlsx_rgb(value.into()));
+                                fill.insert(String::from("background"), JsonValue::String(get_xlsx_rgb(value.into())));
                             },
                             b"indexed" => {
                                 let value = att.decode_and_unescape_value(&xml).unwrap();
-                                fill.insert(String::from("background"), get_indexed_color(&value));
+                                fill.insert(String::from("background"), JsonValue::String(get_indexed_color(&value)));
                             },
                             _ => ()
                         }
@@ -1040,7 +1044,7 @@ impl XLSX {
                         let border_struct = border_structs.pop().unwrap();
                         let (key, value) = border_struct.get_computed_style();
                         if value != "" {
-                            border.insert(key, value);
+                            border.insert(key, JsonValue::String(value));
                         }
                     }
                     borders.push(border);
