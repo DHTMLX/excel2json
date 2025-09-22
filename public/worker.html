@@ -19,13 +19,13 @@
     <script type="module">
     import MyWorker from "../dist/worker.js?worker";
     let $ = document.querySelector.bind(document);
-    
+
     let worker;
     $("#convert-button").addEventListener("change", function(e){
         if (!worker) {
             worker = new Promise((res) => {
-                 const path = `${window.location.origin}/dist/worker.js`;
-               // const path = "https://cdn.dhtmlx.com/libs/json2excel/1.4/worker.js";
+                const path = `${window.location.origin}/dist/worker.js`;
+                // const path = "https://cdn.dhtmlx.com/libs/json2excel/1.5/worker.js";
                 const url = window.URL.createObjectURL(
                     new Blob([`importScripts('${path}');`], {
                         type: "text/javascript",

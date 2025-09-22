@@ -3,7 +3,7 @@ Excel2json
 
 Excel2json is a Rust and WebAssembly-based library that allows easily converting files in Excel format to JSON files.
 
-[![npm version](https://badge.fury.io/js/excel2json-wasm.svg)](https://badge.fury.io/js/excel2json-wasm) 
+[![npm version](https://badge.fury.io/js/excel2json-wasm.svg)](https://badge.fury.io/js/excel2json-wasm)
 
 ### How to build
 
@@ -40,15 +40,15 @@ convert(file_object_or_typed_array, optional_config).then(json => {
 
 CDN links are the following:
 
-- https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js 
-- https://cdn.dhtmlx.com/libs/excel2json/1.2/module.js 
-- https://cdn.dhtmlx.com/libs/excel2json/1.2/excel2json_wasm_bg.wasm
+- https://cdn.dhtmlx.com/libs/excel2json/1.5/worker.js
+- https://cdn.dhtmlx.com/libs/excel2json/1.5/module.js
+- https://cdn.dhtmlx.com/libs/excel2json/1.5/excel2json_wasm_bg.wasm
 
 
-You can import and use lib dynamically like 
+You can import and use lib dynamically like
 
 ```js
-const convert = import("https://cdn.dhtmlx.com/libs/excel2json/1.2/module.js");
+const convert = import("https://cdn.dhtmlx.com/libs/excel2json/1.5/module.js");
 const blob = convert(json_data_to_export);
 ```
 
@@ -56,11 +56,11 @@ or use it as web worker
 
 ```js
 var url = window.URL.createObjectURL(new Blob([
-    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js');"
+    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.5/worker.js');"
 ], { type: "text/javascript" }));
 
 // you need to server worker from the same domain as the main script
-var worker = new Worker("./worker.js"); 
+var worker = new Worker("./worker.js");
 worker.addEventListener("message", ev => {
     if (ev.data.type === "ready"){
         const json = ev.data.data;
@@ -82,11 +82,11 @@ if you want to load worker script from CDN and not from your domain it requires 
 
 ```js
 var url = window.URL.createObjectURL(new Blob([
-    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.2/worker.js');"
+    "importScripts('https://cdn.dhtmlx.com/libs/excel2json/1.5/worker.js');"
 ], { type: "text/javascript" }));
 
 var worker = new Promise((res) => {
-    const x = Worker(url); 
+    const x = Worker(url);
     worker.addEventListener("message", ev => {
         if (ev.data.type === "ready"){
             const json = ev.data.data;
@@ -153,7 +153,7 @@ interface IMergedCell {
 }
 
 interface IDataPoint {
-    column: number; 
+    column: number;
     row: number;
 }
 
@@ -193,6 +193,6 @@ interface IStyle {
 }
 ```
 
-### License 
+### License
 
 MIT

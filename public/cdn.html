@@ -17,9 +17,9 @@
     <textarea id="text2"></textarea>
 
     <script type="module">
-    import { convert } from "https://cdn.dhtmlx.com/libs/excel2json/1.4/module.js";
+    import { convert } from "https://cdn.dhtmlx.com/libs/excel2json/1.5/module.js";
     let $ = document.querySelector.bind(document);
-    
+
     $("#convert-button").addEventListener("change", function(e){
         import("../dist/module").then(({ convert }) => {
             convert(this.files[0]).then(({ data, styles }) => {
