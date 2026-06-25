@@ -95,6 +95,8 @@ pub struct Cell {
     pub s: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hyperlink: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<CellFormula>,
 }
 
 impl Cell {
@@ -103,8 +105,23 @@ impl Cell {
             v: None,
             s: 0,
             hyperlink: None,
+            formula: None,
         }
     }
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CellFormula {
+    #[serde(rename = "type")]
+    pub formula_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub si: Option<String>,
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -272,7 +289,6 @@ impl XLSX {
             .trim_end_matches(".xml");
         
         let hyperlinks_map = Self::read_sheet_relationships(&mut self.zip, sheet_rel_path)?;
-        dbg!(&hyperlinks_map);
         let mut xml = match xml_reader(&mut self.zip, &path) {
             None => {
                 return Err(XlsxError::FileNotFound(path))
@@ -423,7 +439,7 @@ impl XLSX {
                     }
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
-                    let has_value = last_cell.v.is_some() || last_cell.s > 0;
+                    let has_value = last_cell.v.is_some() || last_cell.s > 0 || last_cell.formula.is_some();
                     let has_hyperlink = current_cell_name
                         .as_ref()
                         .map(|name| hyperlinks.contains_key(name))
@@ -481,17 +497,21 @@ impl XLSX {
                     }
                 },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"f" => {
-                    if current_formula_attrs.get("t").map(|v| v == "shared").unwrap_or(false) {
-                        if let Some(si) = current_formula_attrs.get("si") {
-                            if let Some(formula) = current_formula_text.clone() {
-                                if let Some(cell_name) = current_cell_name.clone() {
-                                    shared_formulas.insert(si.clone(), SharedFormula {
-                                        base_cell: cell_name,
-                                        formula,
-                                    });
-                                }
-                            } else if flags & WITH_FORMULAS > 0 {
-                                if let (Some(shared_formula), Some(cell_name)) = (
+                    if flags & WITH_FORMULAS > 0 {
+                        last_cell.formula = build_cell_formula(
+                            &current_formula_attrs,
+                            current_formula_text.clone(),
+                        );
+                        if current_formula_attrs.get("t").map(|v| v == "shared").unwrap_or(false) {
+                            if let Some(si) = current_formula_attrs.get("si") {
+                                if let Some(formula) = current_formula_text.clone() {
+                                    if let Some(cell_name) = current_cell_name.clone() {
+                                        shared_formulas.insert(si.clone(), SharedFormula {
+                                            base_cell: cell_name,
+                                            formula,
+                                        });
+                                    }
+                                } else if let (Some(shared_formula), Some(cell_name)) = (
                                     shared_formulas.get(si),
                                     current_cell_name.as_ref(),
                                 ) {
@@ -1120,6 +1140,27 @@ fn xml_reader<'a>(zip: &'a mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Optio
     }
 }
 
+fn build_cell_formula(attrs: &HashMap<String, String>, text: Option<String>) -> Option<CellFormula> {
+    if attrs.get("t").map(|v| v == "shared").unwrap_or(false) {
+        let role = if text.is_some() { "master" } else { "follower" };
+        return Some(CellFormula {
+            formula_type: String::from("shared"),
+            role: Some(String::from(role)),
+            si: attrs.get("si").cloned(),
+            reference: attrs.get("ref").cloned(),
+            value: text,
+        });
+    }
+
+    text.map(|value| CellFormula {
+        formula_type: String::from("normal"),
+        role: None,
+        si: None,
+        reference: None,
+        value: Some(value),
+    })
+}
+
 fn shift_formula_references(formula: &str, base_cell: &str, target_cell: &str) -> String {
     let (base_col, base_row) = cell_index_to_offsets(base_cell.to_string());
     let (target_col, target_row) = cell_index_to_offsets(target_cell.to_string());
@@ -1431,7 +1472,54 @@ mod tests {
     }
 
     #[test]
-    fn shifts_shared_formula_references() {
+    fn reads_shared_formula_metadata() {
+        use std::io::Read;
+
+        let mut file = std::fs::File::open("./example/file_example_styles.xlsx").unwrap();
+        let mut buf = vec!();
+        file.read_to_end(&mut buf).unwrap();
+
+        let mut xlsx = XLSX::new(buf);
+        let (name, path) = xlsx.sheets[0].clone();
+        let data = xlsx.read_sheet(path, name, WITH_FORMULAS).unwrap();
+
+        let master = data.cells[2][4].as_ref().unwrap();
+        assert_eq!(master.v.as_deref(), Some("=SUM(C3:D3)"));
+        assert_eq!(master.formula.as_ref().unwrap().formula_type, "shared");
+        assert_eq!(master.formula.as_ref().unwrap().role.as_deref(), Some("master"));
+        assert_eq!(master.formula.as_ref().unwrap().si.as_deref(), Some("0"));
+        assert_eq!(master.formula.as_ref().unwrap().reference.as_deref(), Some("E3:E7"));
+        assert_eq!(master.formula.as_ref().unwrap().value.as_deref(), Some("SUM(C3:D3)"));
+
+        let follower = data.cells[3][4].as_ref().unwrap();
+        assert_eq!(follower.v.as_deref(), Some("=SUM(C4:D4)"));
+        assert_eq!(follower.formula.as_ref().unwrap().formula_type, "shared");
+        assert_eq!(follower.formula.as_ref().unwrap().role.as_deref(), Some("follower"));
+        assert_eq!(follower.formula.as_ref().unwrap().si.as_deref(), Some("0"));
+        assert_eq!(follower.formula.as_ref().unwrap().reference, None);
+        assert_eq!(follower.formula.as_ref().unwrap().value, None);
+    }
+
+    #[test]
+    fn reads_normal_formula_metadata() {
+        use std::io::Read;
+
+        let mut file = std::fs::File::open("./example/formats.xlsx").unwrap();
+        let mut buf = vec!();
+        file.read_to_end(&mut buf).unwrap();
+
+        let mut xlsx = XLSX::new(buf);
+        let (name, path) = xlsx.sheets[0].clone();
+        let data = xlsx.read_sheet(path, name, WITH_FORMULAS).unwrap();
+
+        let cell = data.cells[1][2].as_ref().unwrap();
+        assert_eq!(cell.v.as_deref(), Some("=A2/B2"));
+        assert_eq!(cell.formula.as_ref().unwrap().formula_type, "normal");
+        assert_eq!(cell.formula.as_ref().unwrap().value.as_deref(), Some("A2/B2"));
+    }
+
+    #[test]
+    fn shifts_shared_formula_references_for_legacy_value() {
         assert_eq!(
             shift_formula_references("A11/$A$2", "B11", "B12"),
             "A12/$A$2"
@@ -1451,24 +1539,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_shared_formula_followers() {
-        use std::io::Read;
-
-        let mut file = std::fs::File::open("./example/file_example_styles.xlsx").unwrap();
-        let mut buf = vec!();
-        file.read_to_end(&mut buf).unwrap();
-
-        let mut xlsx = XLSX::new(buf);
-        let (name, path) = xlsx.sheets[0].clone();
-        let data = xlsx.read_sheet(path, name, WITH_FORMULAS).unwrap();
-
-        assert_eq!(data.cells[2][4].as_ref().unwrap().v.as_deref(), Some("=SUM(C3:D3)"));
-        assert_eq!(data.cells[3][4].as_ref().unwrap().v.as_deref(), Some("=SUM(C4:D4)"));
-        assert_eq!(data.cells[4][4].as_ref().unwrap().v.as_deref(), Some("=SUM(C5:D5)"));
-    }
-
-    #[test]
-    fn shared_formula_followers_keep_cached_values_without_formula_flag() {
+    fn formulas_are_omitted_without_formula_flag() {
         use std::io::Read;
 
         let mut file = std::fs::File::open("./example/file_example_styles.xlsx").unwrap();
@@ -1482,5 +1553,7 @@ mod tests {
         assert_eq!(data.cells[2][4].as_ref().unwrap().v.as_deref(), Some("240400"));
         assert_eq!(data.cells[3][4].as_ref().unwrap().v.as_deref(), Some("204200"));
         assert_eq!(data.cells[4][4].as_ref().unwrap().v.as_deref(), Some("76900"));
+        assert!(data.cells[2][4].as_ref().unwrap().formula.is_none());
+        assert!(data.cells[3][4].as_ref().unwrap().formula.is_none());
     }
 }
