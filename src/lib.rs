@@ -175,11 +175,6 @@ struct SheetInfo {
     use_shared_string_for_next: bool,
 }
 
-struct SharedFormula {
-    base_cell: String,
-    formula: String,
-}
-
 impl SheetInfo {
     pub fn new() -> SheetInfo {
         SheetInfo {
@@ -308,7 +303,6 @@ impl XLSX {
         let mut current_cell_name: Option<String> = None;
         let mut current_formula_attrs: HashMap<String, String> = HashMap::new();
         let mut current_formula_text: Option<String> = None;
-        let mut shared_formulas: HashMap<String, SharedFormula> = HashMap::new();
 
         loop {
             buf.clear();
@@ -502,28 +496,6 @@ impl XLSX {
                             &current_formula_attrs,
                             current_formula_text.clone(),
                         );
-                        if current_formula_attrs.get("t").map(|v| v == "shared").unwrap_or(false) {
-                            if let Some(si) = current_formula_attrs.get("si") {
-                                if let Some(formula) = current_formula_text.clone() {
-                                    if let Some(cell_name) = current_cell_name.clone() {
-                                        shared_formulas.insert(si.clone(), SharedFormula {
-                                            base_cell: cell_name,
-                                            formula,
-                                        });
-                                    }
-                                } else if let (Some(shared_formula), Some(cell_name)) = (
-                                    shared_formulas.get(si),
-                                    current_cell_name.as_ref(),
-                                ) {
-                                    let formula = shift_formula_references(
-                                        &shared_formula.formula,
-                                        &shared_formula.base_cell,
-                                        cell_name,
-                                    );
-                                    last_cell.v = Some("=".to_owned() + &formula);
-                                }
-                            }
-                        }
                     }
                     mode = 0
                 }
@@ -1161,171 +1133,6 @@ fn build_cell_formula(attrs: &HashMap<String, String>, text: Option<String>) -> 
     })
 }
 
-fn shift_formula_references(formula: &str, base_cell: &str, target_cell: &str) -> String {
-    let (base_col, base_row) = cell_index_to_offsets(base_cell.to_string());
-    let (target_col, target_row) = cell_index_to_offsets(target_cell.to_string());
-    let delta_col = target_col as i32 - base_col as i32;
-    let delta_row = target_row as i32 - base_row as i32;
-
-    let chars: Vec<char> = formula.chars().collect();
-    let mut out = String::new();
-    let mut i = 0;
-    let mut in_string = false;
-
-    while i < chars.len() {
-        let ch = chars[i];
-        if ch == '"' {
-            out.push(ch);
-            if in_string && i + 1 < chars.len() && chars[i + 1] == '"' {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            in_string = !in_string;
-            i += 1;
-            continue;
-        }
-
-        if !in_string {
-            if let Some((reference, len)) = parse_a1_reference(&chars, i) {
-                out.push_str(&shift_a1_reference(&reference, delta_col, delta_row));
-                i += len;
-                continue;
-            }
-        }
-
-        out.push(ch);
-        i += 1;
-    }
-
-    out
-}
-
-#[derive(Debug, PartialEq)]
-struct A1Reference {
-    col_abs: bool,
-    col: u32,
-    row_abs: bool,
-    row: u32,
-}
-
-fn parse_a1_reference(chars: &[char], start: usize) -> Option<(A1Reference, usize)> {
-    if start > 0 && is_formula_name_char(chars[start - 1]) {
-        return None;
-    }
-
-    let mut i = start;
-    let col_abs = if chars.get(i) == Some(&'$') {
-        i += 1;
-        true
-    } else {
-        false
-    };
-
-    let col_start = i;
-    while i < chars.len() && chars[i].is_ascii_alphabetic() {
-        i += 1;
-    }
-    if i == col_start {
-        return None;
-    }
-
-    let row_abs = if chars.get(i) == Some(&'$') {
-        i += 1;
-        true
-    } else {
-        false
-    };
-
-    let row_start = i;
-    while i < chars.len() && chars[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == row_start {
-        return None;
-    }
-
-    if i < chars.len() && (is_formula_name_char(chars[i]) || chars[i] == '(') {
-        return None;
-    }
-
-    let col_label: String = chars[col_start..(if row_abs { row_start - 1 } else { row_start })]
-        .iter()
-        .collect::<String>()
-        .to_ascii_uppercase();
-    let row_label: String = chars[row_start..i].iter().collect();
-    let col = column_label_to_number(&col_label)?;
-    let row = row_label.parse::<u32>().ok()?;
-
-    if col == 0 || col > 16384 || row == 0 || row > 1_048_576 {
-        return None;
-    }
-
-    Some((
-        A1Reference {
-            col_abs,
-            col,
-            row_abs,
-            row,
-        },
-        i - start,
-    ))
-}
-
-fn shift_a1_reference(reference: &A1Reference, delta_col: i32, delta_row: i32) -> String {
-    let col = if reference.col_abs {
-        reference.col
-    } else {
-        add_delta(reference.col, delta_col)
-    };
-    let row = if reference.row_abs {
-        reference.row
-    } else {
-        add_delta(reference.row, delta_row)
-    };
-
-    format!(
-        "{}{}{}{}",
-        if reference.col_abs { "$" } else { "" },
-        number_to_column_label(col),
-        if reference.row_abs { "$" } else { "" },
-        row,
-    )
-}
-
-fn add_delta(value: u32, delta: i32) -> u32 {
-    if delta < 0 {
-        value.saturating_sub(delta.unsigned_abs())
-    } else {
-        value.saturating_add(delta as u32)
-    }
-}
-
-fn column_label_to_number(label: &str) -> Option<u32> {
-    let mut number = 0u32;
-    for ch in label.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        number = number * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
-    }
-    Some(number)
-}
-
-fn number_to_column_label(mut number: u32) -> String {
-    let mut label = String::new();
-    while number > 0 {
-        number -= 1;
-        label.insert(0, (b'A' + (number % 26) as u8) as char);
-        number /= 26;
-    }
-    label
-}
-
-fn is_formula_name_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
-}
-
 fn get_xlsx_rgb(argb: String) -> String {
     let raw_a = u8::from_str_radix(&argb[..2], 16).unwrap();
     let a = (raw_a as f32 / 255f32).to_string();
@@ -1516,26 +1323,6 @@ mod tests {
         assert_eq!(cell.v.as_deref(), Some("=A2/B2"));
         assert_eq!(cell.formula.as_ref().unwrap().formula_type, "normal");
         assert_eq!(cell.formula.as_ref().unwrap().value.as_deref(), Some("A2/B2"));
-    }
-
-    #[test]
-    fn shifts_shared_formula_references_for_legacy_value() {
-        assert_eq!(
-            shift_formula_references("A11/$A$2", "B11", "B12"),
-            "A12/$A$2"
-        );
-        assert_eq!(
-            shift_formula_references("$A11+A$11+$A$11", "B11", "C12"),
-            "$A12+B$11+$A$11"
-        );
-        assert_eq!(
-            shift_formula_references("A1:B2", "A1", "B2"),
-            "B2:C3"
-        );
-        assert_eq!(
-            shift_formula_references("IF(A1=\"A1\",A1,LOG10(A1))", "A1", "A2"),
-            "IF(A2=\"A1\",A2,LOG10(A2))"
-        );
     }
 
     #[test]
