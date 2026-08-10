@@ -9,13 +9,13 @@ use gloo_utils::format::JsValueSerdeExt;
 use quick_xml;
 use zip;
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader as XmlReader;
 use zip::read::{ZipArchive, ZipFile};
 
 // default collections
 use std::io::Cursor;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader};
 use std::collections::HashMap;
 use serde_json::Value as JsonValue;
 
@@ -829,6 +829,14 @@ impl XLSX {
                         }
                     }
                 },
+                Ok(Event::Start(ref e)) if xml_path == StyleXMLPath::Xf && xml_parent_path == StyleXMLPath::CellXfs && e.name().as_ref() == b"protection" => {
+                    let xf = styles.last_mut().unwrap();
+                    read_protection_attrs(&xml, e, xf);
+                },
+                Ok(Event::Empty(ref e)) if xml_path == StyleXMLPath::Xf && xml_parent_path == StyleXMLPath::CellXfs && e.name().as_ref() == b"protection" => {
+                    let xf = styles.last_mut().unwrap();
+                    read_protection_attrs(&xml, e, xf);
+                },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"numFmt" => {
                     let mut format_code = String::from("");
                     let mut format_id = String::from("");
@@ -1152,6 +1160,19 @@ fn get_indexed_color(s: &str) -> String {
     }
 }
 
+fn read_protection_attrs<R: BufRead>(xml: &XmlReader<R>, e: &BytesStart, xf: &mut Dict) {
+    for a in e.attributes() {
+        let att = a.unwrap();
+        match att.key.as_ref() {
+            b"locked" => {
+                let value = att.decode_and_unescape_value(xml).unwrap();
+                xf.insert(String::from("locked"), JsonValue::Bool(value == "1" || value == "true"));
+            },
+            _ => ()
+        }
+    }
+}
+
 fn get_format(code: &str) -> Option<String> {
     match code {
         "0" => Some(String::from("General")),
@@ -1215,5 +1236,31 @@ mod tests {
         assert_eq!(cell_index_to_offsets(String::from("A24")), (0, 23));
         assert_eq!(cell_index_to_offsets(String::from("AB1")), (27, 0));
         assert_eq!(cell_index_to_offsets(String::from("ZZ100")), (701, 99));
+    }
+
+    #[test]
+    fn reads_protection_locked_style() {
+        let mut xml = XmlReader::from_str(r#"<protection locked="0"/>"#);
+        let mut buf = Vec::new();
+        let mut xf = HashMap::new();
+
+        match xml.read_event_into(&mut buf) {
+            Ok(Event::Empty(ref e)) => read_protection_attrs(&xml, e, &mut xf),
+            _ => panic!("expected protection element"),
+        }
+
+        assert_eq!(xf.get("locked"), Some(&JsonValue::Bool(false)));
+
+        let mut xml = XmlReader::from_str(r#"<protection locked="1"/>"#);
+        xml.expand_empty_elements(true);
+        let mut buf = Vec::new();
+        let mut xf = HashMap::new();
+
+        match xml.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => read_protection_attrs(&xml, e, &mut xf),
+            _ => panic!("expected expanded protection element"),
+        }
+
+        assert_eq!(xf.get("locked"), Some(&JsonValue::Bool(true)));
     }
 }
