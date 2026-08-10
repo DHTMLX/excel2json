@@ -17,13 +17,13 @@ export async function convertArray(jsonData, config = {}) {
     const getStyles = config.styles === undefined ? true : config.styles;
     const xlsx = XLSX.new(jsonData);
     const styles = getStyles ? xlsx.get_styles() : null;
+    const mode = 0 | (config.formulas ? XLSX.with_formulas() : 0);
 
     let data;
     if (config.sheet) {
-        data = [xlsx.get_sheet_data(config.sheet)];
+        data = [xlsx.get_sheet_data(config.sheet, mode)];
     } else {
         const sheets = xlsx.get_sheets();
-        const mode = 0 | (config.formulas ? XLSX.with_formulas() : 0);
         data = sheets.map(name => xlsx.get_sheet_data(name, mode));
     }
 

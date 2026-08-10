@@ -26,14 +26,14 @@ async function doConvert(input, config) {
 
     const xlsx = XLSX.new(input);
     const styles = getStyles ? xlsx.get_styles() : null;
+    const mode = 0 | (config.formulas ? XLSX.with_formulas() : 0);
 
     let sheetsData;
     if (config.sheet) {
-        const data = xlsx.get_sheet_data(config.sheet);
+        const data = xlsx.get_sheet_data(config.sheet, mode);
         sheetsData = [data];
     } else {
         const sheets = xlsx.get_sheets();
-        const mode = 0 | (config.formulas ? XLSX.with_formulas() : 0);
         sheetsData = sheets.map(name => xlsx.get_sheet_data(name, mode));
     }
 

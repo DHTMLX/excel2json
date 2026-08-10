@@ -51,7 +51,8 @@
         worker.then(x => {
             x.postMessage({
                 type: "convert",
-                data: this.files[0]
+                data: this.files[0],
+                formulas: true,
             });
         });
     });

@@ -168,6 +168,17 @@ interface IRowData {
 interface IDataCell{
     v: string;
     s: number:
+    formula?: IFormula;
+}
+
+// present when formulas:true; v keeps the original legacy behavior:
+// cells with formula text in XLSX use "=...", shared formula followers keep cached values
+interface IFormula {
+    type: "normal" | "shared";
+    role?: "master" | "follower";
+    si?: string;
+    ref?: string;
+    value?: string;
 }
 
 interface IStyle {
