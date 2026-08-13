@@ -62,6 +62,15 @@ enum XlsxError {
     FileNotFound(String)
 }
 
+impl std::fmt::Display for XlsxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            XlsxError::Default => write!(f, "failed to parse xlsx"),
+            XlsxError::FileNotFound(path) => write!(f, "xlsx part not found: {path}"),
+        }
+    }
+}
+
 
 #[derive(Serialize)]
 pub struct ColumnData {
@@ -362,7 +371,6 @@ impl XLSX {
                     }
                 },
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"row" => {
-                    let mut use_custom_height = false;
                     let mut height = 0.0;
                     let mut index = 0;
                     let mut hidden: Option<bool> = None;
@@ -372,10 +380,6 @@ impl XLSX {
                         match att.key.as_ref() {
                             b"ht" => {
                                 height = att.decode_and_unescape_value(&xml).unwrap().parse::<f32>().unwrap() / HEIGHT_COEF;
-                            },
-                            b"customHeight" => {
-                                let v = att.decode_and_unescape_value(&xml).unwrap();
-                                use_custom_height = v == "1" || v == "true";
                             },
                             b"r" => {
                                 index = att.decode_and_unescape_value(&xml).unwrap().parse::<usize>().unwrap();
@@ -1363,6 +1367,9 @@ mod tests {
         assert_eq!(data.cells[4][4].as_ref().unwrap().v.as_deref(), Some("76900"));
         assert!(data.cells[2][4].as_ref().unwrap().formula.is_none());
         assert!(data.cells[3][4].as_ref().unwrap().formula.is_none());
+    }
+
+    #[test]
     fn reads_protection_locked_style() {
         let mut xml = XmlReader::from_str(r#"<protection locked="0"/>"#);
         let mut buf = Vec::new();

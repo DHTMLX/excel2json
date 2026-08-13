@@ -204,6 +204,17 @@ interface IStyle {
 }
 ```
 
+### Versions
+
+- **1.6.0** — Locked cells; shared formula import with per-cell formula metadata (`formulas: true`).
+- **1.5.0** — Text wrapping; row height import.
+- **1.4.0** — Frozen rows/columns, hidden rows/columns, data validation, and hyperlinks.
+- **1.3.0** — Styles on empty cells; skip empty borders; `textAlign` renamed to `align`; phonetic runs ignored in shared strings.
+- **1.2.0** — Formula export (`formulas: true`); formatted text parsing; ESM `convert` / `convertArray` API.
+- **1.0.2** — Default border color.
+- **1.0.1** — CDN links.
+- **1.0.0** — Initial WASM Excel-to-JSON converter.
+
 ### License
 
 MIT

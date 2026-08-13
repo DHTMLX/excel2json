@@ -3,11 +3,11 @@ set -e
 
 server=$1
 folder=$2
-version=$3
+version=$(jq -r '.version' package.json)
 
-if [ -z "$server" ] || [ -z "$folder" ] || [ -z "$version" ]; then
-    echo "Usage: $0 <server> <folder> <version>"
-    echo "Example: $0 user@example.com /var/www/apps 1.3.0"
+if [ -z "$server" ] || [ -z "$folder" ]; then
+    echo "Usage: $0 <server> <folder>"
+    echo "Example: $0 user@example.com /var/www/apps"
     exit 1
 fi
 
